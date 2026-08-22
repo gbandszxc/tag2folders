@@ -1861,11 +1861,13 @@ impl AppShell {
                             .on_click(on_recursive),
                     )
                     .child(
-                        // 开始扫描:primary lg + MusicIcon 15;loading 禁用+文案切换
+                        // 开始扫描:primary + MusicIcon 15;与输入/浏览同高38保持三者协调
                         Button::new("scan-start")
                             .label(if loading { "正在扫描…" } else { "开始扫描" })
                             .variant(ButtonVariant::Primary)
-                            .size(ButtonSize::Lg)
+                            .size(ButtonSize::Md)
+                            .h(px(38.0))
+                            .pad_x(px(20.0))
                             .icon(Icon::Music, px(15.0))
                             .loading(loading)
                             .disabled(dir_empty)

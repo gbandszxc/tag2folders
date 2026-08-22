@@ -308,7 +308,10 @@ pub fn render_dir_picker(
             div()
                 .absolute()
                 .left(px(10.0))
-                .top(px(11.0))
+                .top(px(0.0))
+                .bottom(px(0.0))
+                .flex()
+                .items_center()
                 .child(icon_sized(Icon::Folder, px(16.0)).text_color(icon_color)),
         )
         .when(has_value && !disabled, |el| {
@@ -318,7 +321,8 @@ pub fn render_dir_picker(
                     .id("dir-clear")
                     .absolute()
                     .right(px(8.0))
-                    .top(px(10.0))
+                    .top(px(0.0))
+                    .bottom(px(0.0))
                     .flex()
                     .items_center()
                     .justify_center()
