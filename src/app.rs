@@ -2027,7 +2027,9 @@ impl AppShell {
                                 "下一步：设置模板".to_string()
                             })
                             .variant(ButtonVariant::Primary)
-                            .size(ButtonSize::Lg)
+                            .size(ButtonSize::Md)
+                            .h(px(38.0))
+                            .pad_x(px(20.0))
                             .icon(Icon::ArrowRight, px(15.0))
                             .icon_right()
                             .disabled(files_empty)
@@ -2035,7 +2037,6 @@ impl AppShell {
                     ),
             );
         }
-
         page.into_any_element()
     }
 
@@ -2179,13 +2180,14 @@ impl AppShell {
             Button::new("preview-generate")
                 .label(if loading { "生成预览中…" } else { "生成预览" })
                 .variant(ButtonVariant::Primary)
-                .size(ButtonSize::Lg)
+                .size(ButtonSize::Md)
+                .h(px(38.0))
+                .pad_x(px(20.0))
                 .icon(Icon::Eye, px(15.0))
                 .loading(loading)
                 .disabled(loading || no_files || template.trim().is_empty())
                 .on_click(on_preview),
         );
-
         // ── 4.2.1 无文件警告(noFiles;先于配置卡渲染,marginBottom 16)──
         let no_files_bar = no_files.then(|| {
             div()
@@ -2400,6 +2402,9 @@ impl AppShell {
                     Button::new("preview-back")
                         .label("返回扫描")
                         .variant(ButtonVariant::Outline)
+                        .size(ButtonSize::Md)
+                        .h(px(38.0))
+                        .pad_x(px(16.0))
                         .icon(Icon::ArrowLeft, px(14.0))
                         .on_click(on_back),
                 )
@@ -2407,13 +2412,14 @@ impl AppShell {
                     Button::new("preview-start")
                         .label(format!("开始执行整理（{organizable_count} 个文件）"))
                         .variant(ButtonVariant::Primary)
-                        .size(ButtonSize::Lg)
+                        .size(ButtonSize::Md)
+                        .h(px(38.0))
+                        .pad_x(px(20.0))
                         .icon(Icon::ArrowRight, px(15.0))
                         .icon_right()
                         .disabled(organizable_count == 0)
                         .on_click(on_start),
                 );
-
             div()
                 .child(stats_grid)
                 .child(tab_row)
