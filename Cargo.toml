@@ -1,0 +1,45 @@
+[package]
+name = "tag2folders"
+version = "2.0.1"
+description = "基于音频元数据标签自动整理文件的桌面工具（GPUI 版）"
+authors = ["gbandszxc"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.85"
+
+[lib]
+name = "tag2folders_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tag2folders"
+path = "src/main.rs"
+
+[dependencies]
+# UI 框架（crates.io 注册表版本，禁止混用 git 依赖的 gpui——见 docs/GPUI_NOTES.md 第 1 节）
+# runtime_shaders：把 Metal shader 编译从构建期（需要 `xcrun metal`，本机仅有
+# Command Line Tools 无该工具）延迟到运行期（macOS 系统 Metal 框架自带运行时
+# 编译器，无需开发者工具链）。见 docs/PORT_NOTES.md §5。
+# 装好完整 Xcode + Metal Toolchain 后可移除该 feature 恢复构建期编译。
+gpui = { version = "0.2.2", features = ["runtime_shaders"] }
+gpui-component = "0.5.1"
+
+# 后端业务依赖（与源项目 src-tauri/Cargo.toml 保持一致）
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+lofty = "0.22"
+regex = "1"
+uuid = { version = "1", features = ["v4"] }
+dunce = "1"
+filetime = "0.2"
+# 数据目录定位：GPUI 版用数据目录持久化 task_id（替代源前端的 localStorage）
+dirs = "5"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Storage_FileSystem",
+    "Win32_Foundation",
+] }
