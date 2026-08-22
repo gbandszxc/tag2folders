@@ -14,15 +14,18 @@
 //! - "三个页面始终挂载"的源语义(仅 display 切换、保留状态)由"struct 字段
 //!   常驻 + render 按 current_step 切换"天然满足。
 
+use std::collections::HashSet;
+
 use gpui::prelude::*;
 use gpui::{
-    Context, DefiniteLength, Entity, FocusHandle, Pixels, SharedString, Subscription, Window, div,
-    px,
+    Context, DefiniteLength, Entity, FocusHandle, HighlightStyle, Pixels, SharedString, StyledText,
+    Subscription, Window, div, px,
 };
 
 use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Input, InputEvent, InputState};
-use tag2folders_lib::core::AudioMetadata;
+use tag2folders_lib::core::preview::PreviewRequest;
+use tag2folders_lib::core::{AudioMetadata, FileMappingItem, MappingStatus, OrganizeMode};
 use tag2folders_lib::service;
 
 use crate::ui::components::{
@@ -31,7 +34,7 @@ use crate::ui::components::{
     step_nav_aside,
 };
 use crate::ui::dir_picker::{DirPickerEvent, DirPickerState, render_dir_picker};
-use crate::ui::service::run_service_result;
+use crate::ui::service::{run_service_in, run_service_result};
 use crate::ui::theme;
 use crate::ui::{Icon, icon_16, icon_sized};
 
@@ -102,6 +105,45 @@ const TABLE_LIMIT: usize = 200;
 /// 固定表头行(见 docs/KNOWN_DIFFERENCES.md)。
 const TABLE_BODY_MAX_H: Pixels = px(480.0);
 
+// ── 预览页常量(SOURCE_SPEC 4.2 / 2.13)────────────────────────────────────
+
+/// 模板默认值 / 输入框占位文案(SPEC 4.2.2 useState 初值)。
+const DEFAULT_TEMPLATE: &str = "{artist}/{album}/{title}.{ext}";
+
+/// 占位符芯片全表(SPEC 4.2.2 PLACEHOLDERS;tag 带花括号、中文小标)。
+const PLACEHOLDERS: [(&str, &str); 7] = [
+    ("{artist}", "艺术家"),
+    ("{album}", "专辑"),
+    ("{title}", "标题"),
+    ("{track}", "音轨号"),
+    ("{year}", "年份"),
+    ("{genre}", "流派"),
+    ("{ext}", "后缀"),
+];
+
+/// 映射表最多渲染行数(SPEC 4.2.4 TABLE_LIMIT=300;纯 UI 截断,父级数据完整)。
+const PREVIEW_TABLE_LIMIT: usize = 300;
+
+/// 目录树默认展开深度(SPEC 2.13 initialExpandedDepth=2:展开 0、1 层)。
+const TREE_INITIAL_EXPANDED_DEPTH: usize = 2;
+
+/// 目录树哨兵键(子树内直接文件列表)与转义形式(见 preview.rs build_directory_tree)。
+const TREE_SENTINEL: &str = "__files__";
+const TREE_ESCAPED_SENTINEL: &str = "__files__\u{0}";
+
+/// 目录树主体最大/最小高度(SPEC 2.13 maxHeight;PreviewPage 传 420)。
+const TREE_BODY_MAX_H: Pixels = px(420.0);
+const TREE_BODY_MIN_H: Pixels = px(140.0);
+
+/// 预览结果区视图切换(SPEC 4.2.4 activeTab)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewTab {
+    /// 详细映射列表
+    List,
+    /// 目录树层级预览
+    Tree,
+}
+
 /// 步骤 1:扫描文件(SOURCE_SPEC 4.1)。页面为普通 struct(状态挂在 AppShell 上),
 /// 高交互控件(DirPicker/筛选输入)持有独立 Entity。
 pub struct ScanPage {
@@ -157,11 +199,35 @@ impl ScanPage {
     }
 }
 
-/// 步骤 2:模板预览(数据结构占位)。页面 agent 参考 SPEC 4.2。
+/// 步骤 2:模板预览(SOURCE_SPEC 4.2)。页面为普通 struct(状态挂在 AppShell 上),
+/// 高交互控件(目标目录 DirPicker / 模板输入 / 树过滤输入)持有独立 Entity。
 pub struct PreviewPage {
-    /// 目标目录选择
+    /// 目标目录选择(placeholder 动态:留空则整理到源目录(源目录))
     pub dir: Entity<DirPickerState>,
-    // TODO(页面 agent):template/targetDir/mode/mappings/directoryTree 等
+    /// 命名模板输入(mono;默认值与 placeholder 均为 `{artist}/{album}/{title}.{ext}`)
+    pub template_input: Entity<InputState>,
+    /// 模板输入框是否聚焦(占位符插入的分支条件,等价源 `document.activeElement === el`)
+    pub template_focused: bool,
+    /// 当前悬浮的占位符芯片下标(源 PlaceholderChip 自带 hovered 态;gpui 需上提)
+    pub hovered_chip: Option<usize>,
+    /// 操作模式(默认 copy;表单变更之一)
+    pub mode: OrganizeMode,
+    pub loading: bool,
+    pub error: Option<String>,
+    pub mappings: Vec<FileMappingItem>,
+    pub directory_tree: serde_json::Value,
+    pub resolved_target_dir: String,
+    /// 结果区视图切换(list=映射表 / tree=目录树)
+    pub active_tab: PreviewTab,
+    /// 目录树过滤输入(SOURCE_SPEC 2.13 `过滤文件...`)
+    pub tree_filter: Entity<InputState>,
+    /// 目录树全部展开开关(源 expandAll;翻转 = 源 key 变更强制重挂载、重置全部开合)
+    pub tree_expand_all: bool,
+    /// 被用户手动切换过开合的树节点(与默认开合相反;expandAll 翻转时清空)
+    pub tree_toggled: HashSet<String>,
+    // ── 表单值镜像:React useEffect 依赖数组"同值不触发 effect"的等价实现 ──
+    pub form_template: String,
+    pub form_target_dir: String,
 }
 
 impl PreviewPage {
@@ -171,7 +237,70 @@ impl PreviewPage {
             s.label = Some("目标目录".into());
             s
         });
-        Self { dir }
+        let template_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(DEFAULT_TEMPLATE)
+                .placeholder(DEFAULT_TEMPLATE)
+        });
+        let tree_filter = cx.new(|cx| InputState::new(window, cx).placeholder("过滤文件..."));
+        Self {
+            dir,
+            template_input,
+            template_focused: false,
+            hovered_chip: None,
+            mode: OrganizeMode::Copy,
+            loading: false,
+            error: None,
+            mappings: Vec::new(),
+            directory_tree: empty_tree(),
+            resolved_target_dir: String::new(),
+            active_tab: PreviewTab::List,
+            tree_filter,
+            tree_expand_all: true,
+            tree_toggled: HashSet::new(),
+            form_template: DEFAULT_TEMPLATE.to_string(),
+            form_target_dir: String::new(),
+        }
+    }
+}
+
+/// 空目录树(`{}`)。
+fn empty_tree() -> serde_json::Value {
+    serde_json::Value::Object(Default::default())
+}
+
+/// 开始整理前剔除的状态(SOURCE_SPEC 4.2.5:后端预检会整批拒绝这三类)。
+fn is_organizable(m: &FileMappingItem) -> bool {
+    !matches!(
+        m.status,
+        MappingStatus::Unreadable | MappingStatus::BoundaryError | MappingStatus::WriteError
+    )
+}
+
+/// 树节点默认开合(SOURCE_SPEC 2.13:`defaultOpen && depth < initialExpandedDepth`,
+/// 即默认展开 0、1 层);用户手动切换过的节点取反,expandAll 翻转后重置。
+fn tree_node_open(expand_all: bool, user_toggled: bool, depth: usize) -> bool {
+    let default_open = expand_all && depth < TREE_INITIAL_EXPANDED_DEPTH;
+    if user_toggled {
+        !default_open
+    } else {
+        default_open
+    }
+}
+
+/// 目录树过滤(SOURCE_SPEC 2.13):文件名小写子串匹配(`f.toLowerCase()
+/// .includes(filter.toLowerCase())`);空过滤全通过。
+fn tree_file_matches(file: &str, filter_lower: &str) -> bool {
+    filter_lower.is_empty() || file.to_lowercase().contains(&filter_lower.to_lowercase())
+}
+
+/// 转义哨兵键解码:目录组件恰好叫 `__files__` 时后端存为 `__files__\0`
+/// (preview.rs build_directory_tree),展示时还原。
+fn decode_tree_key(key: &str) -> &str {
+    if key == TREE_ESCAPED_SENTINEL {
+        TREE_SENTINEL
+    } else {
+        key
     }
 }
 
@@ -216,13 +345,25 @@ pub struct AppShell {
     reset_key: u32,
 
     /// App 级扫描数据(源 App.tsx `scannedFiles`,handleScanComplete 写入;
-    /// 预览页 D4 消费:generate_preview 的入参文件列表)
-    #[allow(dead_code)] // D4(预览页)接入后移除
+    /// 预览页消费:generate_preview 的入参文件列表)
     pub scanned_files: Vec<AudioMetadata>,
     /// App 级源目录(源 App.tsx `sourceDir`;注意是提交值:扫描成功 = trim 后
     /// 输入、"下一步"带筛选 = 页面原值、作废/失败 = '')
-    #[allow(dead_code)] // D4(预览页)接入后移除
     pub source_dir: String,
+
+    /// App 级整理批次(源 App.tsx `mappings`):预览页"开始执行整理"写入,
+    /// 表单变更/重扫描即作废(onClearOrganize)。**给 D5 进度页**:以
+    /// `start_organize(organize_mappings, organize_mode, organize_target_dir)` 发起任务。
+    pub organize_mappings: Vec<FileMappingItem>,
+    /// App 级整理模式(源 organizeMode;作废/重扫复位 copy)
+    pub organize_mode: OrganizeMode,
+    /// App 级整理目标目录(源 targetDir;= resolvedTargetDir || targetDir || sourceDir)
+    pub organize_target_dir: String,
+    /// 进行中整理任务 id(源 App.tsx taskId / localStorage `tag2folders_task_id`
+    /// 的内存部分;onOrganize 与 reset 置 ''。**TODO(D5 进度页)**:start_organize
+    /// 成功后写入 + 数据目录持久化 + get_task_status 轮询;退出确认的
+    /// has_running_task 应以本字段非空为准)
+    pub task_id: String,
 
     pub scan: ScanPage,
     pub preview: PreviewPage,
@@ -232,6 +373,10 @@ pub struct AppShell {
     /// 放 AppShell(而非 ScanPage)是因为 reset 会重建页面结构体,token 必须
     /// 跨重建单调递增,才能丢弃"重置前发起"的在途扫描(等价源卸载时 token+1)。
     scan_token: u64,
+
+    /// 预览请求竞态 token(SPEC 4.2.3 abortRef):表单变更/新预览/reset 时 +1,
+    /// 回调比对后丢弃过期响应。与 scan_token 同理放 AppShell 跨页面重建。
+    preview_token: u64,
 
     /// 待挂载的确认弹窗(单例:重置/退出)
     confirm: Option<PendingConfirm>,
@@ -252,6 +397,10 @@ impl AppShell {
             reset_key: 0,
             scanned_files: Vec::new(),
             source_dir: String::new(),
+            organize_mappings: Vec::new(),
+            organize_mode: OrganizeMode::Copy,
+            organize_target_dir: String::new(),
+            task_id: String::new(),
             scan: ScanPage::new(window, cx),
             preview: PreviewPage::new(window, cx),
             progress: ProgressPage::new(),
@@ -259,6 +408,7 @@ impl AppShell {
             confirm_focus,
             exit_confirmed: false,
             scan_token: 0,
+            preview_token: 0,
             _subs: Vec::new(),
         };
 
@@ -294,15 +444,38 @@ impl AppShell {
             &scan_filter,
             |_this, _entity, _ev: &InputEvent, cx| cx.notify(),
         ));
-        // 预览页(占位):目录变化仅重绘
+        // 预览页(SPEC 4.2.3 表单变更效应):目标目录变化 → 作废已有预览结果
         let preview_dir = self.preview.dir.clone();
         self._subs.push(cx.subscribe(
             &preview_dir,
-            |_this, _entity, ev: &DirPickerEvent, cx| {
-                if let DirPickerEvent::Changed(_) = ev {
-                    cx.notify();
+            |this, _entity, ev: &DirPickerEvent, cx| {
+                if let DirPickerEvent::Changed(v) = ev {
+                    this.on_preview_target_changed(v.clone(), cx);
                 }
             },
+        ));
+        // 模板输入:Change → 作废;Focus/Blur → 维护光标插入的分支条件
+        let preview_template = self.preview.template_input.clone();
+        self._subs.push(cx.subscribe(
+            &preview_template,
+            |this, _entity, ev: &InputEvent, cx| match ev {
+                InputEvent::Change => this.on_preview_template_changed(cx),
+                InputEvent::Focus => {
+                    this.preview.template_focused = true;
+                    cx.notify();
+                }
+                InputEvent::Blur => {
+                    this.preview.template_focused = false;
+                    cx.notify();
+                }
+                _ => {}
+            },
+        ));
+        // 目录树过滤:纯渲染态,只需重绘
+        let tree_filter = self.preview.tree_filter.clone();
+        self._subs.push(cx.subscribe(
+            &tree_filter,
+            |_this, _entity, _ev: &InputEvent, cx| cx.notify(),
         ));
     }
 
@@ -316,6 +489,7 @@ impl AppShell {
     // ── 扫描页逻辑(SOURCE_SPEC 4.1.8)─────────────────────────────────────
 
     /// 开始扫描:token 竞态防护 + 后台线程执行(重 IO 不阻塞 UI)。
+    /// 回调带 window:handleScanComplete 需更新预览页目标目录 placeholder(InputState)。
     fn handle_scan(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let raw = self.scan.dir.read(cx).value(cx);
         let source_dir = raw.trim().to_string();
@@ -329,10 +503,11 @@ impl AppShell {
         cx.notify();
 
         let work_dir = source_dir.clone();
-        run_service_result(
+        run_service_in(
+            _window,
             cx,
             move || service::scan_directory(work_dir.clone(), Some(recursive)),
-            move |this, result, cx| {
+            move |this, result, window, cx| {
                 // 在途时输入已变更(或已重置)→ 丢弃本次响应
                 if this.scan_token != token {
                     return;
@@ -342,14 +517,14 @@ impl AppShell {
                     Ok(resp) => {
                         this.scan.files = resp.files.clone();
                         this.scan.has_scanned = true;
-                        this.handle_scan_complete(resp.files, source_dir, cx);
+                        this.handle_scan_complete(resp.files, source_dir, window, cx);
                     }
                     Err(msg) => {
                         // 失败:清旧结果,旧表格与"下一步"不可用;App 级数据同步清空
-                        this.scan.error = Some(msg);
+                        this.scan.error = Some(msg.to_string());
                         this.scan.files = Vec::new();
                         this.scan.has_scanned = true;
-                        this.handle_scan_complete(Vec::new(), String::new(), cx);
+                        this.handle_scan_complete(Vec::new(), String::new(), window, cx);
                     }
                 }
             },
@@ -378,22 +553,35 @@ impl AppShell {
         // 清筛选关键词(InputState 设值需要 window)
         let filter_input = self.scan.filter_input.clone();
         filter_input.update(cx, |state, cx| state.set_value("", window, cx));
-        self.handle_scan_complete(Vec::new(), String::new(), cx);
+        self.handle_scan_complete(Vec::new(), String::new(), window, cx);
     }
 
     /// App 级 handleScanComplete(SOURCE_SPEC 1.7):写入 scannedFiles/sourceDir、
     /// 解锁状态机推进(有数据 → max_unlocked ≥ 2;无数据锁回 1 并回步骤 1)。
+    /// 同时清 App 级整理批次(源:setMappings([]) + setOrganizeMode('copy') +
+    /// setTargetDir('');**页面本地状态保留不清**——三页常驻,源亦如此)。
     pub fn handle_scan_complete(
         &mut self,
         files: Vec<AudioMetadata>,
         dir: String,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let has_files = !files.is_empty();
         self.scanned_files = files;
         self.source_dir = dir;
-        // TODO(D4 预览页 agent):源 handleScanComplete 同时清 App 级
-        // mappings、organizeMode='copy'、targetDir=''(页面本地状态保留不清)
+        self.clear_organize_batch();
+        // 预览页目标目录 placeholder 动态拼源目录(SPEC 4.2.2:
+        // `留空则整理到源目录（{sourceDir}）`;清空时回落基础文案)
+        let placeholder = if self.source_dir.is_empty() {
+            "留空则整理到源目录".to_string()
+        } else {
+            format!("留空则整理到源目录（{}）", self.source_dir)
+        };
+        let preview_dir_input = self.preview.dir.read(cx).input.clone();
+        preview_dir_input.update(cx, |state, cx| {
+            state.set_placeholder(placeholder, window, cx);
+        });
         if has_files {
             self.max_unlocked_step = self.max_unlocked_step.max(2);
         } else {
@@ -405,12 +593,12 @@ impl AppShell {
 
     /// "下一步:设置模板"(SPEC 4.1.7 handleNext):有筛选词时先把筛选子集
     /// 提交为 App 级数据(下游预览只用被筛过的文件),再切到步骤 2。
-    fn handle_next(&mut self, cx: &mut Context<Self>) {
+    fn handle_next(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let keyword = self.scan.filter_input.read(cx).value().to_string();
         if !keyword.trim().is_empty() {
             let filtered = self.scan.filtered_files(cx);
             let source_dir = self.scan.dir.read(cx).value(cx);
-            self.handle_scan_complete(filtered, source_dir, cx);
+            self.handle_scan_complete(filtered, source_dir, window, cx);
         }
         // onNext = setCurrentStep(2),无解锁检查(源行为)
         self.current_step = 2;
@@ -423,16 +611,196 @@ impl AppShell {
         self.current_step = 1;
         self.max_unlocked_step = 1;
         self.reset_key += 1;
-        // 丢弃"重置前发起"的在途扫描(等价源卸载时 scanTokenRef += 1)
+        // 丢弃"重置前发起"的在途扫描/预览(等价源卸载时 tokenRef += 1)
         self.scan_token += 1;
+        self.preview_token += 1;
         self.scanned_files.clear();
         self.source_dir.clear();
+        self.clear_organize_batch();
+        self.task_id.clear(); // TODO(D5):同步清数据目录持久化的 task_id
         // 重建页面 = 源 resetKey 强制重挂载(内部状态与订阅全部丢弃重建)
         self.scan = ScanPage::new(window, cx);
         self.preview = PreviewPage::new(window, cx);
         self.progress = ProgressPage::new();
         self.wire_page_subscriptions(window, cx);
-        // TODO(页面 agent):taskId 清除(含持久化)
+        cx.notify();
+    }
+
+    // ── 预览页逻辑(SOURCE_SPEC 4.2.3 / 4.2.5)─────────────────────────────
+
+    /// App 级 onClearOrganize(源 App.tsx):mappings=[]、organizeMode='copy'、
+    /// targetDir=''。预览失败/表单变更/重扫描时调用,防止旧计划被执行。
+    fn clear_organize_batch(&mut self) {
+        self.organize_mappings.clear();
+        self.organize_mode = OrganizeMode::Copy;
+        self.organize_target_dir.clear();
+    }
+
+    /// 清页面本地预览结果(mappings/directoryTree/resolvedTargetDir)。
+    fn clear_preview_results(&mut self) {
+        self.preview.mappings.clear();
+        self.preview.directory_tree = empty_tree();
+        self.preview.resolved_target_dir.clear();
+    }
+
+    /// 表单变更效应(SPEC 4.2.3 useEffect [template, targetDir, mode]):
+    /// 作废在途响应 + 清本地预览结果 + onClearOrganize("开始执行整理"随之消失)。
+    fn invalidate_preview_results(&mut self, cx: &mut Context<Self>) {
+        self.preview_token += 1; // abort:在途响应过期
+        self.preview.loading = false;
+        self.clear_preview_results();
+        self.clear_organize_batch();
+        cx.notify();
+    }
+
+    /// 模板输入变化(React setState 同值不触发 effect 的语义)。
+    fn on_preview_template_changed(&mut self, cx: &mut Context<Self>) {
+        let v = self.preview.template_input.read(cx).value().to_string();
+        if v == self.preview.form_template {
+            return;
+        }
+        self.preview.form_template = v;
+        self.invalidate_preview_results(cx);
+    }
+
+    /// 目标目录变化(手输/清空/原生对话框/浏览模态选定;同值不触发)。
+    fn on_preview_target_changed(&mut self, new_dir: String, cx: &mut Context<Self>) {
+        if new_dir == self.preview.form_target_dir {
+            return;
+        }
+        self.preview.form_target_dir = new_dir;
+        self.invalidate_preview_results(cx);
+    }
+
+    /// 操作模式切换(点击已激活项无效果,React setState 同值语义)。
+    fn set_preview_mode(&mut self, mode: OrganizeMode, cx: &mut Context<Self>) {
+        if mode == self.preview.mode {
+            return;
+        }
+        self.preview.mode = mode;
+        self.invalidate_preview_results(cx);
+    }
+
+    /// 点击占位符芯片(SPEC 4.2.2 insertPlaceholder):聚焦中 → 在**光标位置**
+    /// 插入(gpui-component InputState::insert 取内部光标,插入后光标落在
+    /// 插入文本末尾,等价源 setSelectionRange);未聚焦 → 追加到末尾。随后
+    /// 聚焦输入框(源 requestAnimationFrame focus)。
+    fn insert_placeholder(&mut self, tag: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let focused = self.preview.template_focused;
+        let input = self.preview.template_input.clone();
+        input.update(cx, |state, cx| {
+            if focused {
+                state.insert(tag.to_string(), window, cx);
+            } else {
+                let appended = format!("{}{tag}", state.value());
+                state.set_value(appended, window, cx);
+            }
+            state.focus(window, cx);
+        });
+    }
+
+    /// 生成预览(SPEC 4.2.3 handlePreview)。
+    fn handle_preview(&mut self, cx: &mut Context<Self>) {
+        let template_raw = self.preview.template_input.read(cx).value().to_string();
+        if template_raw.trim().is_empty() {
+            return;
+        }
+        // 中止上一个在途请求 + 先作废旧预览(新请求失败时旧计划不可执行;
+        // 亦清 App 级整理批次,防止 /progress 执行过期计划)
+        self.preview_token += 1;
+        let token = self.preview_token;
+        self.clear_preview_results();
+        self.clear_organize_batch();
+        self.preview.loading = true;
+        self.preview.error = None;
+        cx.notify();
+
+        // effectiveTarget = targetDir.trim() || sourceDir(留空 → 整理到源目录)
+        let target_raw = self.preview.dir.read(cx).value(cx);
+        let effective_target = {
+            let t = target_raw.trim();
+            if t.is_empty() {
+                self.source_dir.clone()
+            } else {
+                t.to_string()
+            }
+        };
+        let files = self.scanned_files.clone();
+        let template = template_raw.trim().to_string();
+        let mode = self.preview.mode;
+
+        run_service_result(
+            cx,
+            move || {
+                service::generate_preview(PreviewRequest {
+                    files,
+                    template,
+                    target_dir: effective_target,
+                    mode,
+                })
+            },
+            move |this, result, cx| {
+                if this.preview_token != token {
+                    return; // 过期响应(表单已变更/已重置),丢弃
+                }
+                this.preview.loading = false;
+                match result {
+                    Ok(resp) => {
+                        if !resp.template_errors.is_empty() {
+                            // Ok 路径模板错误(SPEC 4.2.3):'；' 连接
+                            this.preview.error = Some(resp.template_errors.join("；"));
+                            this.clear_preview_results();
+                        } else {
+                            this.preview.mappings = resp.mappings;
+                            this.preview.directory_tree = resp.directory_tree;
+                            this.preview.resolved_target_dir = resp.target_dir;
+                        }
+                    }
+                    // Err 路径:模板校验错(TemplateErrors,前端 toError 以 '\n'
+                    // 连接)或目标目录校验字符串——文案由 ServiceError::Display 给出
+                    Err(msg) => this.preview.error = Some(msg),
+                }
+                cx.notify();
+            },
+        );
+    }
+
+    /// 开始执行整理(SPEC 4.2.5 handleStartOrganize):剔除 unreadable /
+    /// boundary_error / write_error 三类必然被预检整批拒绝的映射,把整理参数
+    /// 交给 App 级状态(D5 进度页消费),解锁并进入步骤 3。
+    /// **无二次确认弹窗**(SPEC 7.1:移动模式的防护 = 静态警告条 + 进度页文案)。
+    fn handle_start_organize(&mut self, cx: &mut Context<Self>) {
+        let organizable: Vec<FileMappingItem> = self
+            .preview
+            .mappings
+            .iter()
+            .filter(|m| is_organizable(m))
+            .cloned()
+            .collect();
+        // onOrganize(m, mode, resolvedTargetDir || targetDir || sourceDir)
+        let target_dir = if !self.preview.resolved_target_dir.is_empty() {
+            self.preview.resolved_target_dir.clone()
+        } else {
+            let raw = self.preview.dir.read(cx).value(cx);
+            if !raw.is_empty() {
+                raw
+            } else {
+                self.source_dir.clone()
+            }
+        };
+        self.organize_mappings = organizable;
+        self.organize_mode = self.preview.mode;
+        self.organize_target_dir = target_dir;
+        self.task_id.clear(); // 源 onOrganize 内 setTaskId('')
+        // onNext = setMaxUnlockedStep(3) + setCurrentStep(3)
+        self.max_unlocked_step = 3;
+        self.current_step = 3;
+        cx.notify();
+    }
+
+    /// 返回扫描(onBack = setCurrentStep(1),源无解锁检查)。
+    fn go_back_to_scan(&mut self, cx: &mut Context<Self>) {
+        self.current_step = 1;
         cx.notify();
     }
 
@@ -583,25 +951,11 @@ impl AppShell {
             )
     }
 
-    /// 当前页渲染。步骤 1 已实现;步骤 2/3 仍为占位(页面 agent 替换)。
+    /// 当前页渲染。步骤 1/2 已实现;步骤 3 仍为占位(进度页 agent 替换)。
     fn render_page(&self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         match self.current_step {
             1 => self.render_scan_page(window, cx).into_any_element(),
-            2 => {
-                let app: &mut gpui::App = cx;
-                card()
-                    .title("整理配置")
-                    .subtitle("设置目标目录与命名模板,点击占位符即可插入")
-                    .child(render_dir_picker(&self.preview.dir, window, app))
-                    .child(
-                        div()
-                            .mt(px(14.0))
-                            .text_size(px(13.0))
-                            .text_color(theme::SLATE_500)
-                            .child("预览页占位 —— 由页面 agent 实现(SPEC 4.2)"),
-                    )
-                    .into_any_element()
-            }
+            2 => self.render_preview_page(window, cx).into_any_element(),
             _ => card()
                 .title("任务概览")
                 .subtitle("整理任务的模式、目标与待处理数量")
@@ -650,7 +1004,7 @@ impl AppShell {
             |this, _e: &gpui::ClickEvent, window, cx| this.clear_scan_filter(window, cx),
         );
         let on_next = cx.listener(
-            |this, _e: &gpui::ClickEvent, _window, cx| this.handle_next(cx),
+            |this, _e: &gpui::ClickEvent, window, cx| this.handle_next(window, cx),
         );
 
         // 筛选栏(SPEC 4.1.5):前缀文字 + 字段胶囊(单选) + 关键词输入 + 清空
@@ -942,6 +1296,654 @@ impl AppShell {
         filter_input.update(cx, |state, cx| state.set_value("", window, cx));
         cx.notify();
     }
+
+    // ── 预览页渲染(SOURCE_SPEC 4.2.1 ~ 4.2.5)──────────────────────────────
+
+    /// 步骤 2 完整页面:无文件警告 → 整理配置卡(目标目录 / 命名模板+占位符
+    /// chips / 操作模式 toggle+移动警告 / 错误条 / 生成预览按钮)→ 结果区
+    /// (统计 StatCard / Tabs / 映射表或目录树 / 底部导航)。
+    fn render_preview_page(&self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let no_files = self.scanned_files.is_empty();
+        let loading = self.preview.loading;
+        let error = self.preview.error.clone();
+        let mode = self.preview.mode;
+        let template = self.preview.template_input.read(cx).value().to_string();
+        let has_results = !self.preview.mappings.is_empty();
+
+        // ── 事件处理器(全部先于 &mut App 重借用创建)──
+        let on_go_scan = cx.listener(
+            |this, _e: &gpui::ClickEvent, _window, cx| this.go_back_to_scan(cx),
+        );
+        let on_back = cx.listener(
+            |this, _e: &gpui::ClickEvent, _window, cx| this.go_back_to_scan(cx),
+        );
+        let on_preview = cx.listener(
+            |this, _e: &gpui::ClickEvent, _window, cx| this.handle_preview(cx),
+        );
+        let on_start = cx.listener(
+            |this, _e: &gpui::ClickEvent, _window, cx| this.handle_start_organize(cx),
+        );
+        let on_copy = cx.listener(|this, _e: &gpui::ClickEvent, _window, cx| {
+            this.set_preview_mode(OrganizeMode::Copy, cx);
+        });
+        let on_move = cx.listener(|this, _e: &gpui::ClickEvent, _window, cx| {
+            this.set_preview_mode(OrganizeMode::Move, cx);
+        });
+        let on_tab_list = cx.listener(|this, _e: &gpui::ClickEvent, _window, cx| {
+            this.preview.active_tab = PreviewTab::List;
+            cx.notify();
+        });
+        let on_tab_tree = cx.listener(|this, _e: &gpui::ClickEvent, _window, cx| {
+            this.preview.active_tab = PreviewTab::Tree;
+            cx.notify();
+        });
+
+        // ── 4.2.2-2 命名模板:输入框 + 占位符芯片行 ──
+        let mut chips_row = div()
+            .mt(px(8.0))
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .text_size(px(12.0))
+                    .text_color(theme::SLATE_500)
+                    .child("插入占位符："),
+            );
+        let hovered_chip = self.preview.hovered_chip;
+        for (ix, (tag, label)) in PLACEHOLDERS.iter().enumerate() {
+            let (tag, label) = (*tag, *label);
+            let on_insert =
+                cx.listener(move |this, _e: &gpui::ClickEvent, window, cx| {
+                    this.preview.hovered_chip = None;
+                    this.insert_placeholder(tag, window, cx);
+                });
+            let on_chip_hover = cx.listener(move |this, hovered: &bool, _window, cx| {
+                this.preview.hovered_chip = hovered.then_some(ix);
+                cx.notify();
+            });
+            chips_row = chips_row.child(placeholder_chip(
+                ix,
+                tag,
+                label,
+                hovered_chip == Some(ix),
+                on_insert,
+                on_chip_hover,
+            ));
+        }
+        let template_block = div()
+            .child(field_label("命名模板"))
+            .child(
+                Input::new(&self.preview.template_input)
+                    .h(px(38.0))
+                    .text_size(px(13.0))
+                    .font_family(theme::FONT_MONO),
+            )
+            .child(chips_row);
+
+        // ── 4.2.2-3 操作模式 toggle + 移动警告条 ──
+        let mut mode_block = div()
+            .child(field_label("操作模式"))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .p(px(3.0))
+                    .gap(px(2.0))
+                    .bg(theme::SLATE_100)
+                    .rounded(theme::RADIUS_MD)
+                    .child(segment_btn(
+                        "mode-copy",
+                        "复制（保留源文件）",
+                        Icon::Copy,
+                        mode == OrganizeMode::Copy,
+                        if mode == OrganizeMode::Copy {
+                            theme::AMBER_800
+                        } else {
+                            theme::SLATE_600
+                        },
+                        None,
+                        on_copy,
+                    ))
+                    .child(segment_btn(
+                        "mode-move",
+                        "移动（删除源文件）",
+                        Icon::ArrowRight,
+                        mode == OrganizeMode::Move,
+                        if mode == OrganizeMode::Move {
+                            theme::AMBER_800
+                        } else {
+                            theme::SLATE_600
+                        },
+                        None,
+                        on_move,
+                    )),
+            );
+        if mode == OrganizeMode::Move {
+            mode_block = mode_block.child(move_mode_warning());
+        }
+
+        // ── 4.2.2-5 生成预览按钮行(右对齐)──
+        let button_row = div().flex().justify_end().child(
+            Button::new("preview-generate")
+                .label(if loading { "生成预览中…" } else { "生成预览" })
+                .variant(ButtonVariant::Primary)
+                .size(ButtonSize::Lg)
+                .icon(Icon::Eye, px(15.0))
+                .loading(loading)
+                .disabled(loading || no_files || template.trim().is_empty())
+                .on_click(on_preview),
+        );
+
+        // ── 4.2.1 无文件警告(noFiles;先于配置卡渲染,marginBottom 16)──
+        let no_files_bar = no_files.then(|| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .px(px(16.0))
+                .py(px(12.0))
+                .bg(theme::AMBER_50)
+                .border_1()
+                .border_color(theme::AMBER_200)
+                .rounded(theme::RADIUS_LG)
+                .mb(px(16.0))
+                .child(
+                    div().flex_none().child(
+                        icon_sized(Icon::AlertTriangle, px(16.0)).text_color(theme::AMBER_600),
+                    ),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .text_size(px(13.0))
+                        .text_color(theme::AMBER_800)
+                        .child("尚未扫描任何文件，请先完成扫描步骤。"),
+                )
+                .child(
+                    Button::new("preview-go-scan")
+                        .label("前往扫描")
+                        .variant(ButtonVariant::Outline)
+                        .size(ButtonSize::Sm)
+                        .on_click(on_go_scan),
+                )
+        });
+
+        // ── 结果区(4.2.4,mappings 非空才整体显示)──
+        let results: Option<gpui::AnyElement> = has_results.then(|| {
+            let mappings = &self.preview.mappings;
+            let count = |st: MappingStatus| mappings.iter().filter(|m| m.status == st).count();
+            let ok_count = count(MappingStatus::Ok);
+            let conflict_count =
+                count(MappingStatus::Conflict) + count(MappingStatus::BatchConflict);
+            let missing_count = count(MappingStatus::MissingMetadata);
+            let unreadable_count = count(MappingStatus::Unreadable);
+            let boundary_count = count(MappingStatus::BoundaryError);
+            let write_count = count(MappingStatus::WriteError);
+            let blocked_count = boundary_count + write_count;
+            let organizable_count =
+                mappings.len() - unreadable_count - boundary_count - write_count;
+
+            // 统计 StatCard 网格(SPEC 4.2.4;grid auto-fit minmax(150,1fr) →
+            // flex wrap + min-w 150,见 KNOWN_DIFFERENCES)
+            let stats_grid = div()
+                .mt(px(18.0))
+                .flex()
+                .flex_wrap()
+                .gap(px(10.0))
+                .child(stat_card(
+                    "文件总数",
+                    mappings.len(),
+                    Icon::FileAudio,
+                    theme::AMBER_300,
+                    theme::AMBER_100,
+                    theme::AMBER_700,
+                    theme::AMBER_800,
+                ))
+                .child(stat_card(
+                    "正常",
+                    ok_count,
+                    Icon::CheckCircle,
+                    theme::EMERALD_200,
+                    theme::EMERALD_50,
+                    theme::EMERALD_600,
+                    theme::EMERALD_700,
+                ))
+                .child(stat_card(
+                    "冲突",
+                    conflict_count,
+                    Icon::AlertTriangle,
+                    theme::AMBER_200,
+                    theme::AMBER_50,
+                    theme::AMBER_600,
+                    theme::AMBER_700,
+                ))
+                .child(stat_card(
+                    "缺失信息",
+                    missing_count,
+                    Icon::Info,
+                    theme::SKY_200,
+                    theme::SKY_50,
+                    theme::SKY_600,
+                    theme::SKY_700,
+                ))
+                .child(stat_card(
+                    "不可读",
+                    unreadable_count,
+                    Icon::XCircle,
+                    theme::BORDER_SUBTLE,
+                    theme::SLATE_100,
+                    theme::SLATE_600,
+                    theme::SLATE_900,
+                ))
+                .child(stat_card(
+                    "越界/写入受阻",
+                    blocked_count,
+                    Icon::AlertCircle,
+                    theme::ROSE_200,
+                    theme::ROSE_50,
+                    theme::ROSE_600,
+                    theme::ROSE_700,
+                ));
+
+            // Tab 切换行(SPEC 2.10 Tabs;tree 激活时右侧附注)
+            let tab_row = div()
+                .mt(px(16.0))
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .p(px(3.0))
+                        .gap(px(2.0))
+                        .bg(theme::SLATE_100)
+                        .rounded(theme::RADIUS_MD)
+                        .child(segment_btn(
+                            "tab-list",
+                            "详细映射列表",
+                            Icon::FileAudio,
+                            self.preview.active_tab == PreviewTab::List,
+                            if self.preview.active_tab == PreviewTab::List {
+                                theme::AMBER_700
+                            } else {
+                                theme::SLATE_600
+                            },
+                            Some(mappings.len()),
+                            on_tab_list,
+                        ))
+                        .child(segment_btn(
+                            "tab-tree",
+                            "目录树层级预览",
+                            Icon::Layers,
+                            self.preview.active_tab == PreviewTab::Tree,
+                            if self.preview.active_tab == PreviewTab::Tree {
+                                theme::AMBER_700
+                            } else {
+                                theme::SLATE_600
+                            },
+                            None,
+                            on_tab_tree,
+                        )),
+                )
+                .when(self.preview.active_tab == PreviewTab::Tree, |el| {
+                    el.child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(theme::SLATE_500)
+                            .child("点击文件夹可展开 / 折叠"),
+                    )
+                });
+
+            // list / tree 视图
+            let content: gpui::AnyElement = match self.preview.active_tab {
+                PreviewTab::List => {
+                    let mut table_card = card()
+                        .padding(CardPadding::None)
+                        .map(|el| el.mt(px(12.0)))
+                        .child(render_mapping_table(mappings));
+                    if mappings.len() > PREVIEW_TABLE_LIMIT {
+                        table_card = table_card.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .px(px(20.0))
+                                .py(px(10.0))
+                                .text_size(px(12.0))
+                                .text_color(theme::SLATE_500)
+                                .child(
+                                    icon_sized(Icon::Info, px(13.0)).text_color(theme::SLATE_400),
+                                )
+                                .child(format!(
+                                    "仅显示前 {PREVIEW_TABLE_LIMIT} 条映射，共 {} 条。",
+                                    mappings.len()
+                                )),
+                        );
+                    }
+                    table_card.into_any_element()
+                }
+                PreviewTab::Tree => div()
+                    .mt(px(12.0))
+                    .child(self.render_directory_tree(cx))
+                    .into_any_element(),
+            };
+
+            // 底部导航条(SPEC 4.2.4;源为 sticky bottom,GPUI 常规流,同扫描页)
+            let bottom_nav = div()
+                .mt(px(16.0))
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(12.0))
+                .px(px(16.0))
+                .py(px(12.0))
+                .bg(theme::BG_SURFACE)
+                .border_1()
+                .border_color(theme::BORDER_SUBTLE)
+                .rounded(theme::RADIUS_LG)
+                .shadow(theme::shadow_sticky_bar())
+                .child(
+                    Button::new("preview-back")
+                        .label("返回扫描")
+                        .variant(ButtonVariant::Outline)
+                        .icon(Icon::ArrowLeft, px(14.0))
+                        .on_click(on_back),
+                )
+                .child(
+                    Button::new("preview-start")
+                        .label(format!("开始执行整理（{organizable_count} 个文件）"))
+                        .variant(ButtonVariant::Primary)
+                        .size(ButtonSize::Lg)
+                        .icon(Icon::ArrowRight, px(15.0))
+                        .icon_right()
+                        .disabled(organizable_count == 0)
+                        .on_click(on_start),
+                );
+
+            div()
+                .child(stats_grid)
+                .child(tab_row)
+                .child(content)
+                .child(bottom_nav)
+                .into_any_element()
+        });
+
+        // ── 整理配置卡(render_dir_picker 需要 &mut App,最后借用 cx)──
+        let app: &mut gpui::App = cx;
+        let mut config_body = div()
+            .flex()
+            .flex_col()
+            .gap(px(18.0))
+            .child(render_dir_picker(&self.preview.dir, window, app))
+            .child(template_block)
+            .child(mode_block);
+        // 4.2.2-4 错误提示(rose,pre-wrap 多行)
+        if let Some(err) = error {
+            config_body = config_body.child(
+                AlertBar::new(AlertVariant::Rose, err)
+                    .icon(Icon::AlertCircle)
+                    .pre_wrap(true),
+            );
+        }
+        let config_card = card()
+            .title("整理配置")
+            .subtitle("设置目标目录与命名模板，点击占位符即可插入")
+            .child(config_body.child(button_row));
+
+        // ── 页面骨架(警告条 → 配置卡 → 结果区)──
+        let mut page = div().flex().flex_col().w_full();
+        if let Some(bar) = no_files_bar {
+            page = page.child(bar);
+        }
+        page = page.child(config_card);
+        if let Some(results) = results {
+            page = page.child(results);
+        }
+        page.into_any_element()
+    }
+
+    // ── 目录树渲染(SOURCE_SPEC 2.13 DirectoryTreeView)──────────────────────
+
+    /// 目录树组件外壳:头部工具栏(Layers 标题 / 过滤输入 / 全部折叠切换)+
+    /// 主体(容器内滚动、min 140 / max 420、bg slate-50)+ 空态。
+    fn render_directory_tree(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let filter_raw = self.preview.tree_filter.read(cx).value().to_string();
+        let filter_lower = filter_raw.to_lowercase();
+
+        // "全部折叠"/"全部展开"切换:翻转 expandAll 并清空用户开合记录
+        // (等价源 key 变更强制重挂载、各节点回默认开合)
+        let on_expand_toggle = cx.listener(|this, _e: &gpui::ClickEvent, _window, cx| {
+            this.preview.tree_expand_all = !this.preview.tree_expand_all;
+            this.preview.tree_toggled.clear();
+            cx.notify();
+        });
+
+        // 主体:根层遍历(子目录对象键 + `__files__` 文件组;serde_json Map 为
+        // BTreeMap 按字典序,与源 JS 对象插入序略有差异,见 KNOWN_DIFFERENCES)
+        let tree = &self.preview.directory_tree;
+        let root_empty = tree.as_object().map(|o| o.is_empty()).unwrap_or(true);
+        let body_inner: gpui::AnyElement = if root_empty {
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .py(px(32.0))
+                .text_color(theme::SLATE_400)
+                .child(icon_sized(Icon::Folder, px(28.0)).text_color(theme::SLATE_300))
+                .child(div().text_size(px(13.0)).child("暂无目录结构数据"))
+                .into_any_element()
+        } else {
+            let mut rows = div().flex().flex_col();
+            if let Some(obj) = tree.as_object() {
+                for (k, v) in obj {
+                    if k == TREE_SENTINEL {
+                        let files = tree_files_of(v);
+                        rows = rows.child(render_tree_files(&files, 0, &filter_lower));
+                    } else {
+                        rows = rows.child(self.render_tree_node(
+                            &format!("root/{k}"),
+                            decode_tree_key(k),
+                            v,
+                            0,
+                            &filter_lower,
+                            cx,
+                        ));
+                    }
+                }
+            }
+            rows.into_any_element()
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .bg(theme::BG_SURFACE)
+            .border_1()
+            .border_color(theme::BORDER_SUBTLE)
+            .rounded(theme::RADIUS_LG)
+            .overflow_hidden()
+            .child(
+                // 头部工具栏:padding 10 16、下边框 subtle、bg slate-50、两端对齐
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .px(px(16.0))
+                    .py(px(10.0))
+                    .border_b_1()
+                    .border_color(theme::BORDER_SUBTLE)
+                    .bg(theme::SLATE_50)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(icon_sized(Icon::Layers, px(15.0)).text_color(theme::AMBER_700))
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .font_weight(gpui::FontWeight(600.0))
+                                    .text_color(theme::SLATE_700)
+                                    .child("目标目录结构"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            // 过滤输入:w 140、h 28、fontSize 12、pl 24、
+                            // 左内嵌 SearchIcon 12 @ left 8
+                            .child(
+                                div()
+                                    .relative()
+                                    .w(px(140.0))
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .left(px(8.0))
+                                            .top(px(8.0))
+                                            .child(
+                                                icon_sized(Icon::Search, px(12.0))
+                                                    .text_color(theme::SLATE_400),
+                                            ),
+                                    )
+                                    .child(
+                                        Input::new(&self.preview.tree_filter)
+                                            .h(px(28.0))
+                                            .text_size(px(12.0))
+                                            .pl(px(24.0))
+                                            .pr(px(8.0)),
+                                    ),
+                            )
+                            .child(
+                                Button::new("tree-expand-toggle")
+                                    .label(if self.preview.tree_expand_all {
+                                        "全部折叠"
+                                    } else {
+                                        "全部展开"
+                                    })
+                                    .variant(ButtonVariant::Ghost)
+                                    .size(ButtonSize::Sm)
+                                    .text_size(px(11.0))
+                                    .pad_x(px(8.0))
+                                    .pad_y(px(4.0))
+                                    .on_click(on_expand_toggle),
+                            ),
+                    ),
+            )
+            .child(
+                // 主体:padding 12 14、min 140 / max 420、容器内滚动、bg slate-50
+                div()
+                    .id("preview-tree-body")
+                    .px(px(14.0))
+                    .py(px(12.0))
+                    .min_h(TREE_BODY_MIN_H)
+                    .max_h(TREE_BODY_MAX_H)
+                    .overflow_y_scroll()
+                    .bg(theme::SLATE_50)
+                    .child(body_inner),
+            )
+    }
+
+    /// 目录节点行(递归):箭头 + 文件夹图标 + 目录名 + 数量徽标 `(直接子项数)`;
+    /// 展开时先渲染子目录、后渲染 `__files__` 文件组(SPEC 2.13)。
+    fn render_tree_node(
+        &self,
+        path_key: &str,
+        name: &str,
+        node: &serde_json::Value,
+        depth: usize,
+        filter_lower: &str,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let path_key = path_key.to_string();
+        let Some(obj) = node.as_object() else {
+            return div();
+        };
+        let files = obj.get(TREE_SENTINEL).map(tree_files_of).unwrap_or_default();
+        let subdirs: Vec<(&String, &serde_json::Value)> =
+            obj.iter().filter(|(k, _)| k.as_str() != TREE_SENTINEL).collect();
+        let total_items = files.len() + subdirs.len();
+
+        let user_toggled = self.preview.tree_toggled.contains(&path_key);
+        let open = tree_node_open(self.preview.tree_expand_all, user_toggled, depth);
+
+        // 点击行 → 切换开合(记录与默认相反的节点)
+        let toggle_key = path_key.clone();
+        let on_toggle = cx.listener(move |this, _e: &gpui::ClickEvent, _window, cx| {
+            if !this.preview.tree_toggled.insert(toggle_key.clone()) {
+                this.preview.tree_toggled.remove(&toggle_key);
+            }
+            cx.notify();
+        });
+
+        // 目录行:padding 5px 12px 5px (depth*20+6)、fontSize 13、weight 600、
+        // slate-800、圆角 6、hover slate-100;箭头 14 slate-400;
+        // FolderOpen/Folder 16 amber-500;数量徽标 11 slate-400
+        let row = div()
+            .id(SharedString::from(format!("tree-dir-{path_key}")))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .pl(px(depth as f32 * 20.0 + 6.0))
+            .pr(px(12.0))
+            .py(px(5.0))
+            .text_size(px(13.0))
+            .font_weight(gpui::FontWeight(600.0))
+            .text_color(theme::SLATE_800)
+            .rounded(theme::RADIUS_SM)
+            .cursor_pointer()
+            .hover(|st| st.bg(theme::SLATE_100))
+            .child(
+                icon_sized(
+                    if open { Icon::ChevronDown } else { Icon::ChevronRight },
+                    px(14.0),
+                )
+                .text_color(theme::SLATE_400),
+            )
+            .child(
+                icon_sized(if open { Icon::FolderOpen } else { Icon::Folder }, px(16.0))
+                    .text_color(theme::AMBER_500),
+            )
+            .child(div().child(name.to_string()))
+            .child(
+                div()
+                    .text_size(px(11.0))
+                    .text_color(theme::SLATE_400)
+                    .ml(px(4.0))
+                    .child(format!("({total_items})")),
+            )
+            .on_click(move |e: &gpui::ClickEvent, window, cx| on_toggle(e, window, cx));
+
+        let mut node_el = div().flex().flex_col().child(row);
+        if open {
+            let mut children = div().flex().flex_col();
+            for (k, v) in subdirs {
+                let child_key = format!("{path_key}/{k}");
+                children = children.child(self.render_tree_node(
+                    &child_key,
+                    decode_tree_key(k),
+                    v,
+                    depth + 1,
+                    filter_lower,
+                    cx,
+                ));
+            }
+            if !files.is_empty() {
+                children = children.child(render_tree_files(&files, depth, filter_lower));
+            }
+            node_el = node_el.child(children);
+        }
+        node_el
+    }
 }
 
 impl Render for AppShell {
@@ -1126,6 +2128,331 @@ fn render_scan_table(display: &[AudioMetadata]) -> impl IntoElement {
         .child(div().flex().flex_col().min_w(px(560.0)).child(header).child(body))
 }
 
+// ── 预览页渲染辅助(SOURCE_SPEC 2.10 ~ 2.13 / 4.2)────────────────────────────
+
+/// 表单字段标签(SPEC 4.2.2):fontSize 13、weight 600、slate-700、marginBottom 6。
+fn field_label(text: &str) -> gpui::Div {
+    div()
+        .text_size(px(13.0))
+        .font_weight(gpui::FontWeight(600.0))
+        .text_color(theme::SLATE_700)
+        .mb(px(6.0))
+        .child(text.to_string())
+}
+
+/// 分段控件按钮(SPEC 2.10 Tabs;4.2.2 操作模式 toggle 同款分段样式):
+/// 激活 = weight 600 + amber-800 + 白底 + 圆角 6 + shadow-xs;
+/// 未激活 = weight 500 + slate-600 + 透明底。可选计数徽章(list Tab)。
+fn segment_btn(
+    id: &str,
+    label: &str,
+    icon: Icon,
+    active: bool,
+    icon_color: gpui::Rgba,
+    badge: Option<usize>,
+    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    let mut btn = div()
+        .id(SharedString::from(id.to_string()))
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .px(px(14.0))
+        .py(px(6.0))
+        .text_size(px(13.0))
+        .font_weight(gpui::FontWeight(if active { 600.0 } else { 500.0 }))
+        .rounded(theme::RADIUS_SM)
+        .whitespace_nowrap()
+        .cursor_pointer()
+        .child(icon_sized(icon, px(14.0)).text_color(icon_color))
+        .child(div().child(label.to_string()))
+        .on_click(move |e: &gpui::ClickEvent, window, cx| on_click(e, window, cx));
+    if active {
+        btn = btn
+            .bg(theme::BG_SURFACE)
+            .text_color(theme::AMBER_800)
+            .shadow(theme::shadow_xs());
+    } else {
+        btn = btn.text_color(theme::SLATE_600);
+    }
+    if let Some(n) = badge {
+        btn = btn.child(
+            div()
+                .text_size(px(11.0))
+                .px(px(6.0))
+                .py(px(1.0))
+                .rounded(theme::RADIUS_FULL)
+                .font_weight(gpui::FontWeight(600.0))
+                .when(active, |el| {
+                    el.bg(theme::AMBER_200).text_color(theme::AMBER_900)
+                })
+                .when(!active, |el| {
+                    el.bg(theme::SLATE_200).text_color(theme::SLATE_600)
+                })
+                .child(n.to_string()),
+        );
+    }
+    btn
+}
+
+/// 占位符芯片(SPEC 2.12 PlaceholderChip):TagIcon 12 + 等宽 tag(weight 600)+
+/// 中文小标 11(常态 slate-500 / 悬浮 amber-800);悬浮 = amber-400 边框 +
+/// amber-100 底 + 深色文字(源 `--amber-950` 未定义 → #0f172a,SPEC 7.9)。
+/// hover 逐子元素变色在 gpui 需页面持有 hover 状态(on_hover 上提实现)。
+fn placeholder_chip(
+    ix: usize,
+    tag: &str,
+    label: &str,
+    hovered: bool,
+    on_insert: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+    on_hover: impl Fn(&bool, &mut Window, &mut gpui::App) + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    let (border, bg, text, icon_color, label_color) = if hovered {
+        (
+            theme::AMBER_400,
+            theme::AMBER_100,
+            theme::INHERITED_TEXT,
+            theme::AMBER_700,
+            theme::AMBER_800,
+        )
+    } else {
+        (
+            theme::SLATE_200,
+            theme::SLATE_50,
+            theme::SLATE_700,
+            theme::SLATE_400,
+            theme::SLATE_500,
+        )
+    };
+    div()
+        .id(SharedString::from(format!("ph-chip-{ix}")))
+        .flex()
+        .items_center()
+        .gap(px(5.0))
+        .px(px(8.0))
+        .py(px(3.0))
+        .text_size(px(12.0))
+        .rounded(theme::RADIUS_SM)
+        .border_1()
+        .border_color(border)
+        .bg(bg)
+        .text_color(text)
+        .cursor_pointer()
+        .child(icon_sized(Icon::Tag, px(12.0)).text_color(icon_color))
+        .child(
+            div()
+                .font_family(theme::FONT_MONO)
+                .font_weight(gpui::FontWeight(600.0))
+                .child(tag.to_string()),
+        )
+        .child(
+            div()
+                .text_size(px(11.0))
+                .opacity(0.9)
+                .text_color(label_color)
+                .child(label.to_string()),
+        )
+        .on_click(move |e: &gpui::ClickEvent, window, cx| on_insert(e, window, cx))
+        .on_hover(move |hovered: &bool, window, cx| on_hover(hovered, window, cx))
+}
+
+/// 移动模式警告条(SPEC 4.2.2):amber-50 底 / amber-200 边框、圆角 8、
+/// padding 10 14;AlertTriangle 16 amber-600;文字 12.5 amber-800、行高 1.6,
+/// "移动模式不可逆："加粗(StyledText 高亮,等价源 `<strong>`)。
+fn move_mode_warning() -> gpui::Div {
+    const PREFIX: &str = "移动模式不可逆：";
+    let text = format!(
+        "{PREFIX}执行后源文件将从原目录删除。请再次确认目标目录与命名模板正确，且源文件已做好备份。"
+    );
+    div()
+        .flex()
+        .items_start()
+        .gap(px(10.0))
+        .px(px(14.0))
+        .py(px(10.0))
+        .bg(theme::AMBER_50)
+        .border_1()
+        .border_color(theme::AMBER_200)
+        .rounded(theme::RADIUS_MD)
+        .mt(px(10.0))
+        .child(
+            div().flex_none().mt(px(2.0)).child(
+                icon_sized(Icon::AlertTriangle, px(16.0)).text_color(theme::AMBER_600),
+            ),
+        )
+        .child(
+            div()
+                .text_size(px(12.5))
+                .text_color(theme::AMBER_800)
+                .line_height(gpui::relative(1.6))
+                .child(StyledText::new(text).with_highlights(vec![(
+                    0..PREFIX.len(),
+                    HighlightStyle {
+                        font_weight: Some(gpui::FontWeight(700.0)),
+                        ..Default::default()
+                    },
+                )])),
+        )
+}
+
+/// StatCard(SPEC 2.11,非 compact 档):白底、圆角 12、阴影 xs、padding 16 18、
+/// 左列(标题 12/500/slate-500 + 数值 22/700/变体色)+ 右侧 38px 图标方块
+/// (变体底色/图标色);边框色随变体。
+fn stat_card(
+    title: &str,
+    value: usize,
+    icon: Icon,
+    border: gpui::Rgba,
+    icon_bg: gpui::Rgba,
+    icon_color: gpui::Rgba,
+    val_color: gpui::Rgba,
+) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .flex_1()
+        .min_w(px(150.0))
+        .px(px(18.0))
+        .py(px(16.0))
+        .bg(theme::BG_SURFACE)
+        .border_1()
+        .border_color(border)
+        .rounded(theme::RADIUS_LG)
+        .shadow(theme::shadow_xs())
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .min_w(px(0.0))
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .font_weight(gpui::FontWeight(500.0))
+                        .text_color(theme::SLATE_500)
+                        .whitespace_nowrap()
+                        .child(title.to_string()),
+                )
+                .child(
+                    div()
+                        .text_size(px(22.0))
+                        .font_weight(gpui::FontWeight(700.0))
+                        .text_color(val_color)
+                        .child(value.to_string()),
+                ),
+        )
+        .child(
+            div()
+                .size(px(38.0))
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .rounded(theme::RADIUS_MD)
+                .bg(icon_bg)
+                .child(icon_sized(icon, px(18.0)).text_color(icon_color)),
+        )
+}
+
+/// 映射表列定义(SPEC 4.2.4):(列名, 宽度百分比)。
+const PREVIEW_TABLE_COLS: [(&str, f32); 3] = [("源文件", 0.38), ("目标路径", 0.46), ("最终状态", 0.16)];
+
+/// 映射表(SPEC 4.2.4):源文件(basename)38% / 目标路径(final_target 完整
+/// 路径)46% / 最终状态(StatusBadge sm)16%;表 minWidth 560 + 外层水平滚动、
+/// 固定表头 + 表体容器内滚动(同扫描页,见 KNOWN_DIFFERENCES);行 hover 底色
+/// slate-50、无斑马纹;**冲突行无特殊底色**(以 amber 徽章表达,源行为);
+/// 行不可点击。最多渲染 300 行(截断提示由调用方追加)。
+fn render_mapping_table(mappings: &[FileMappingItem]) -> impl IntoElement {
+    let header = div()
+        .flex()
+        .bg(theme::SLATE_50)
+        .border_b_1()
+        .border_color(theme::BORDER_SUBTLE)
+        .child(scan_header_cell(PREVIEW_TABLE_COLS[0].1, PREVIEW_TABLE_COLS[0].0))
+        .child(scan_header_cell(PREVIEW_TABLE_COLS[1].1, PREVIEW_TABLE_COLS[1].0))
+        .child(scan_header_cell(PREVIEW_TABLE_COLS[2].1, PREVIEW_TABLE_COLS[2].0));
+
+    let shown_count = mappings.len().min(PREVIEW_TABLE_LIMIT);
+    let mut body = div()
+        .id("preview-table-body")
+        .flex()
+        .flex_col()
+        .max_h(TABLE_BODY_MAX_H)
+        .overflow_y_scroll();
+    for (ix, m) in mappings.iter().take(PREVIEW_TABLE_LIMIT).enumerate() {
+        let row = div()
+            .id(SharedString::from(format!("preview-row-{ix}")))
+            .flex()
+            .items_center()
+            .hover(|st| st.bg(theme::SLATE_50))
+            .when(ix + 1 < shown_count, |el| {
+                el.border_b_1().border_color(theme::SLATE_100)
+            })
+            .child(scan_text_cell(PREVIEW_TABLE_COLS[0].1, basename(&m.source)))
+            .child(scan_text_cell(PREVIEW_TABLE_COLS[1].1, &m.final_target))
+            .child(
+                div()
+                    .w(DefiniteLength::Fraction(PREVIEW_TABLE_COLS[2].1))
+                    .px(px(12.0))
+                    .py(px(9.0))
+                    .child(StatusBadge::from_mapping_status(m.status).size(StatusBadgeSize::Sm)),
+            );
+        body = body.child(row);
+    }
+
+    div()
+        .id("preview-table-scroll")
+        .overflow_x_scroll()
+        .child(div().flex().flex_col().min_w(px(560.0)).child(header).child(body))
+}
+
+/// 取 `__files__` 哨兵键下的文件名数组。
+fn tree_files_of(v: &serde_json::Value) -> Vec<String> {
+    v.as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 文件行组(`__files__` 叶子,SPEC 2.13):FileAudioIcon 14 amber-600 +
+/// 等宽文件名 12.5 slate-700、truncate、hover slate-100;缩进 (depth+1)*20+8;
+/// **整组无过滤匹配则不渲染**(目录节点不过滤,仅文件)。
+fn render_tree_files(files: &[String], depth: usize, filter_lower: &str) -> gpui::Div {
+    let mut col = div().flex().flex_col();
+    let mut any = false;
+    for file in files {
+        if !tree_file_matches(file, filter_lower) {
+            continue;
+        }
+        any = true;
+        col = col.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .pl(px((depth as f32 + 1.0) * 20.0 + 8.0))
+                .pr(px(12.0))
+                .py(px(4.0))
+                .text_size(px(12.5))
+                .font_family(theme::FONT_MONO)
+                .text_color(theme::SLATE_700)
+                .rounded(theme::RADIUS_XS)
+                .hover(|st| st.bg(theme::SLATE_100))
+                .child(icon_sized(Icon::FileAudio, px(14.0)).text_color(theme::AMBER_600))
+                .child(div().flex_1().min_w(px(0.0)).truncate().child(file.clone())),
+        );
+    }
+    if any {
+        col
+    } else {
+        div()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1167,6 +2494,71 @@ mod tests {
         // 反斜杠路径的 basename
         let w = meta("C:\\Music\\Song.mp3", "X", "2000", "Pop", false);
         assert!(matches_filter(FilterField::Filename, "song", &w));
+    }
+
+    // ── 预览页(SPEC 4.2)──────────────────────────────────────────────────
+
+    fn mapping(status: MappingStatus) -> FileMappingItem {
+        FileMappingItem {
+            source: "/tmp/a.mp3".into(),
+            target: "/out/A/a.mp3".into(),
+            final_target: "/out/A/a.mp3".into(),
+            relative_target: "A/a.mp3".into(),
+            status,
+            conflict: false,
+            batch_conflict: false,
+        }
+    }
+
+    /// 开始整理前剔除三类不可执行映射(SPEC 4.2.5):unreadable /
+    /// boundary_error / write_error;保留 ok/conflict/batch_conflict/missing_metadata
+    #[test]
+    fn organizable_filter_excludes_blocked_statuses() {
+        let mappings = vec![
+            mapping(MappingStatus::Ok),
+            mapping(MappingStatus::Conflict),
+            mapping(MappingStatus::BatchConflict),
+            mapping(MappingStatus::MissingMetadata),
+            mapping(MappingStatus::Unreadable),
+            mapping(MappingStatus::BoundaryError),
+            mapping(MappingStatus::WriteError),
+        ];
+        let organizable: Vec<_> = mappings.iter().filter(|m| is_organizable(m)).collect();
+        assert_eq!(organizable.len(), 4);
+        assert!(organizable.iter().all(|m| is_organizable(m)));
+    }
+
+    /// 目录树节点开合(SPEC 2.13):默认展开 0/1 层;用户切换取反;
+    /// expandAll 关闭后默认全收起(用户记录同时被清空,由调用方保证)
+    #[test]
+    fn tree_node_open_follows_default_and_user_toggle() {
+        // expandAll=true:0/1 层默认展开,2 层默认收起
+        assert!(tree_node_open(true, false, 0));
+        assert!(tree_node_open(true, false, 1));
+        assert!(!tree_node_open(true, false, 2));
+        // 用户切换 → 取反
+        assert!(!tree_node_open(true, true, 0));
+        assert!(tree_node_open(true, true, 2));
+        // expandAll=false:全部默认收起
+        assert!(!tree_node_open(false, false, 0));
+        assert!(!tree_node_open(false, false, 1));
+    }
+
+    /// 目录树过滤(SPEC 2.13):文件名小写子串匹配;空过滤全通过
+    #[test]
+    fn tree_file_filter_is_case_insensitive_substring() {
+        assert!(tree_file_matches("Song.mp3", ""));
+        assert!(tree_file_matches("Song.mp3", "song"));
+        assert!(tree_file_matches("Song.mp3", "MP3"));
+        assert!(!tree_file_matches("Song.mp3", "flac"));
+    }
+
+    /// 转义哨兵键解码:目录组件恰好叫 `__files__` 时还原展示名
+    #[test]
+    fn tree_key_decoding_restores_escaped_sentinel() {
+        assert_eq!(decode_tree_key("__files__\u{0}"), "__files__");
+        assert_eq!(decode_tree_key("Artist"), "Artist");
+        assert_eq!(decode_tree_key("__files__"), "__files__");
     }
 }
 

@@ -19,12 +19,14 @@ agent 接入真实 taskId。
 | 左步骤栏宽度 | `clamp(210px, 22vw, 250px)` | `230px` | 同上(1100 窗口下源值 242,最小 900 下源值 210;230 为折中,偏差 ≤12px) |
 | Modal maxHeight | `86vh` | `620px` | 无 vh;750 高窗口 86vh≈645,取保守值 |
 | 扫描页表格滚动模型 | 整页滚动 + `th position:sticky top:0` 表头吸顶 | 表头固定行 + **表体容器内滚动**(max-height 480px) | gpui 无 position:sticky;容器滚动 + 固定表头是等价可达的形态,超长列表不再撑高整页 |
-| 扫描页底部导航条 | `position: sticky; bottom: 0`(贴视口底) | 常规流元素(位于页面末尾) | 同上无 sticky;滚动到底部时视觉一致,滚动中途不悬浮 |
+| 预览页映射表滚动模型 | 同上(sticky 表头) | 同扫描页方案(固定表头 + 表体容器内滚动 max-height 480px) | 同上 |
+| 扫描页/预览页底部导航条 | `position: sticky; bottom: 0`(贴视口底) | 常规流元素(位于页面末尾) | 同上无 sticky;滚动到底部时视觉一致,滚动中途不悬浮 |
+| 预览页统计卡网格 | `grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))` | flex wrap + 每卡 `flex:1; min-width:150` | gpui 无 auto-fit 网格;1080 宽度下 6 卡同样单行等分,窄窗时逐行换行 |
 
 ## 3. 动画降级
 
 - **CSS transition 全部缺失**:gpui 的 hover/active 样式切换是瞬时的,
-  源 150ms/100ms 过渡(按钮、瓦片、行 hover、输入框边框)不可复刻;
+  源 150ms/100ms 过渡(按钮、瓦片、行 hover、输入框边框、占位符芯片)不可复刻;
 - **scaleUp 退化为 opacity fadeIn**:gpui 0.2.2 的 div 无 transform 样式
   (`.scale()`/`translateY` 不存在,只有 Svg 支持 transformation),
   模态入场(scale 0.97 + translateY 4px + opacity)只保留 opacity 部分;
@@ -37,7 +39,7 @@ agent 接入真实 taskId。
 
 | 项 | 差异 |
 |---|---|
-| `title` 悬浮提示 | 源大量使用 `title` 属性(重置按钮"清空所有数据并重新开始"、表格单元格全名、StatusBadge label 等);gpui 无原生 tooltip,当前未实现 |
+| `title` 悬浮提示 | 源大量使用 `title` 属性(重置按钮"清空所有数据并重新开始"、表格单元格全名、StatusBadge label、占位符芯片 `"{label}: {desc} (点击插入)"` 等);gpui 无原生 tooltip,当前未实现 |
 | 输入框聚焦光晕 | 源 `box-shadow: 0 0 0 3px rgba(255,174,0,0.2)`;gpui-component Input 只换聚焦边框色(已设 amber-500 与源一致),3px 光晕未复刻 |
 | 模态遮罩模糊 | 源 `backdrop-filter: blur(4px)`;gpui 遮罩为纯半透明色,无背景模糊 |
 | 表格 hover 滚动条 | 源自定义 6px 滚动条(slate-300 thumb);gpui 用系统/组件库默认滚动条 |
@@ -45,6 +47,10 @@ agent 接入真实 taskId。
 | Enter 触发确认 | 已实现(ConfirmModal 卡片 on_key_down);与源的 autoFocus+原生按钮触发等价 |
 | 未解锁步骤 tabIndex | 源 tabIndex 0/-1 键盘可达;gpui 无 Tab 序精细控制(组件库统一 Tab 遍历),点击规则一致 |
 | 递归扫描复选框 | 源为原生 `<input type="checkbox">`(浏览器/系统绘制) | gpui-component `Checkbox`(自绘方框+对勾,换肤后主色 amber-500);行为等价(点整行切换、切换即触发作废效应) |
+| 占位符芯片光标插入 | 源读 `selectionStart` 在光标处插入再恢复焦点/光标;GPUI 版:输入框**聚焦中**用 `InputState::insert()` 在内部光标处插入(插入后光标落在插入文本末尾,等价)、**未聚焦**追加到末尾,随后聚焦输入框(与源降级分支一致)。差异:输入框聚焦与否的判定改为跟踪 InputEvent::Focus/Blur(等价 `document.activeElement === el`);gpui 点击芯片不会抢走输入框焦点(浏览器会先 blur),因此"聚焦中插光标处"的分支比源**更容易命中**;非空选区时源在选区起点插入且保留选区文本,GPUI 在选区终点插入且保留选区文本(仅多字符选区下有细微位置差异) |
+| 占位符芯片 hover | 源芯片自带 hovered 态(图标/文字随悬浮换色);GPUI 版用 `on_hover` 把 hover 状态上提到页面重渲染实现,**颜色/边框逐项一致**;仅 150ms 过渡缺失(见 §3) |
+| 目录树节点顺序 | 源 JS 对象按 Python dict 插入序遍历;GPUI 版 `serde_json` 默认 BTreeMap,**同层目录/文件按字典序**排列 |
+| 目录树全部展开/折叠 | 源靠 `key={expandAll}` 变更强制重挂载整棵树重置开合;GPUI 版清空用户开合记录 + 重算默认开合(depth<2),行为等价 |
 
 ## 5. 其他
 

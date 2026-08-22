@@ -62,6 +62,8 @@ pub struct Button {
     min_width: Option<Pixels>,
     height: Option<Pixels>,
     pad_x: Option<Pixels>,
+    pad_y: Option<Pixels>,
+    text_size: Option<Pixels>,
     on_click: Option<ClickHandler>,
 }
 
@@ -79,6 +81,8 @@ impl Button {
             min_width: None,
             height: None,
             pad_x: None,
+            pad_y: None,
+            text_size: None,
             on_click: None,
         }
     }
@@ -135,6 +139,18 @@ impl Button {
     /// 覆盖水平内边距(DirPicker 浏览按钮 padding 0 16px)。
     pub fn pad_x(mut self, x: Pixels) -> Self {
         self.pad_x = Some(x);
+        self
+    }
+
+    /// 覆盖垂直内边距(目录树工具栏"全部折叠"按钮 padding 4px 8px)。
+    pub fn pad_y(mut self, y: Pixels) -> Self {
+        self.pad_y = Some(y);
+        self
+    }
+
+    /// 覆盖字号(目录树工具栏按钮 fontSize 11)。
+    pub fn text_size(mut self, size: Pixels) -> Self {
+        self.text_size = Some(size);
         self
     }
 
@@ -233,10 +249,12 @@ impl RenderOnce for Button {
             .gap(if self.loading && has_text { px(4.0) } else { px(6.0) })
             .when_some(self.pad_x, |el, x| el.px(x))
             .when(!self.pad_x.is_some(), |el| el.px(pad_x))
-            .py(pad_y)
+            .when_some(self.pad_y, |el, y| el.py(y))
+            .when(!self.pad_y.is_some(), |el| el.py(pad_y))
             .when_some(self.height, |el, h| el.h(h))
             .when_some(self.min_width, |el, w| el.min_w(w))
-            .text_size(font_size)
+            .when_some(self.text_size, |el, s| el.text_size(s))
+            .when(self.text_size.is_none(), |el| el.text_size(font_size))
             .font_weight(gpui::FontWeight(font_weight as f32))
             .line_height(gpui::relative(1.25))
             .whitespace_nowrap()
