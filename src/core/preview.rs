@@ -232,8 +232,8 @@ pub fn generate_preview(req: &PreviewRequest) -> Result<PreviewResponse, Preview
     let mut file_vs_dir_conflict_set: HashSet<usize> = HashSet::new();
     for i in 0..ft_norms.len() {
         let Some(norm_i) = &ft_norms[i] else { continue };
-        for j in 0..i {
-            let Some(norm_j) = &ft_norms[j] else { continue };
+        for (j, norm_j) in ft_norms[..i].iter().enumerate() {
+            let Some(norm_j) = norm_j else { continue };
             if norm_i.starts_with(norm_j) || norm_j.starts_with(norm_i) {
                 file_vs_dir_conflict_set.insert(i);
                 file_vs_dir_conflict_set.insert(j);
@@ -273,13 +273,13 @@ pub fn generate_preview(req: &PreviewRequest) -> Result<PreviewResponse, Preview
     // 检测哪些原始目标在规划前已有磁盘冲突。排除自冲突：源 == 渲染目标
     // （原地整理）时文件已在正确位置——不是真冲突。
     let mut on_disk_set: HashSet<String> = HashSet::new();
-    for i in 0..n {
-        let raw = &render_results[i].1;
+    for (render, file) in render_results.iter().zip(req.files.iter()) {
+        let raw = &render.1;
         let raw_path = Path::new(raw.as_str());
         // 悬空符号链接视作已占用：exists() 对其返回 False，但 shutil 会跟随
         // 链接写到别处——用户看到的文件位置将与预览不同。
         if (raw_path.exists() || raw_path.is_symlink())
-            && claim_key(raw_path) != claim_key(Path::new(&req.files[i].path))
+            && claim_key(raw_path) != claim_key(Path::new(&file.path))
         {
             on_disk_set.insert(raw.clone());
         }

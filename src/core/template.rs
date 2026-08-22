@@ -113,7 +113,7 @@ fn sanitize_literal_segment(part: &str) -> String {
     }
     // 保留 `.` / `..`（预览边界检测依赖）；其余段去除尾部点/空格
     if safe != "." && safe != ".." {
-        let stripped = safe.trim_end_matches(|c| c == '.' || c == ' ');
+        let stripped = safe.trim_end_matches(['.', ' ']);
         safe = if stripped.is_empty() {
             "_".to_string()
         } else {

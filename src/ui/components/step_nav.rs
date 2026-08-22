@@ -104,12 +104,10 @@ impl StepNav {
         };
 
         let tile_icon = if show_check {
-            icon_sized(Icon::Check, px(18.0))
+            icon_sized(Icon::Check, px(18.0)).text_color(tile_fg)
         } else {
-            icon_sized(step.icon, px(18.0))
+            icon_sized(step.icon, px(18.0)).text_color(tile_fg)
         };
-
-        // 标题/副标题颜色
         let title_color = if dimmed {
             theme::SLATE_400
         } else if active {

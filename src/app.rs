@@ -1212,9 +1212,8 @@ impl AppShell {
                             .justify_center()
                             .rounded(px(10.0))
                             .bg(theme::AMBER_500)
-                            .text_color(theme::SLATE_800)
                             .shadow(theme::shadow_brand_tile())
-                            .child(icon_16(Icon::Tag).size(px(18.0))),
+                            .child(icon_16(Icon::Tag).size(px(18.0)).text_color(theme::SLATE_800)),
                     )
                     .child(
                         div()
@@ -2729,12 +2728,14 @@ impl Render for AppShell {
                         )
                     }))
                     .child(
-                        // 右工作区:flex 1、内滚、padding clamp(16,2.5vw,32) → 24
+                        // 右工作区:flex 1、纵向滚动、padding clamp(16,2.5vw,32) → 24
                         div()
                             .id("workspace-scroll")
                             .flex()
+                            .flex_col()
                             .flex_1()
                             .min_w(px(0.0))
+                            .min_h(px(0.0))
                             .overflow_y_scroll()
                             .p(px(24.0))
                             .child(
@@ -2746,7 +2747,6 @@ impl Render for AppShell {
                             ),
                     ),
             );
-
         // 确认弹窗(单例,deferred 遮罩盖在最上层)
         let confirm_el: gpui::AnyElement = match &self.confirm {
             Some(pending) => {
@@ -2763,7 +2763,7 @@ impl Render for AppShell {
             None => div().into_any_element(),
         };
 
-        div().child(shell).child(confirm_el)
+        div().relative().size_full().overflow_hidden().child(shell).child(confirm_el)
     }
 }
 
@@ -3227,6 +3227,191 @@ fn render_tree_files(files: &[String], depth: usize, filter_lower: &str) -> gpui
     }
 }
 
+
+// ── 窗口关闭确认挂接 ─────────────────────────────────────────────────────────
+//
+// gpui 0.2.2 存在 `window.on_window_should_close(cx, f)`(返回 false 可阻止关闭),
+// 因此源项目的关闭确认弹窗(SPEC 1.5)可以等价实现,不列入 KNOWN_DIFFERENCES。
+
+impl AppShell {
+    /// 在窗口根视图构建后调用(见 main.rs):注册"点关闭按钮先确认"。
+    /// 确认 → `exit_confirmed = true` + `cx.quit()`;取消 → 不动作。
+    pub fn register_close_guard(
+        shell: &Entity<AppShell>,
+        window: &mut Window,
+        cx: &mut gpui::App,
+    ) {
+        let weak = shell.downgrade();
+        window.on_window_should_close(cx, move |window, cx: &mut gpui::App| {
+            weak.update(cx, |this, cx| {
+                if this.exit_confirmed {
+                    true // 已确认,放行
+                } else {
+                    this.open_exit_confirm(window, cx);
+                    false // 拦下本次关闭,等待确认
+                }
+            })
+            .unwrap_or(true) // 实体已释放(不应发生)则放行
+        });
+    }
+}
+
+// ── 截图取证(T1 视觉证据;正常启动路径不经过)──────────────────────────────
+
+/// 演示源/目标目录(仅截图态使用;目标目录在注入时按需创建)。
+const SHOT_SOURCE_DIR: &str = "/tmp/t2f-shots/music";
+const SHOT_TARGET_DIR: &str = "/tmp/t2f-shots/target";
+
+impl AppShell {
+    /// 构造 5 个演示文件的元数据(3 位艺术家;1 个不可读,字段为兜底值)。
+    fn shot_files() -> Vec<AudioMetadata> {
+        let mk = |file: &str,
+                  artist: &str,
+                  album: &str,
+                  title: &str,
+                  track: &str,
+                  year: &str,
+                  genre: &str,
+                  readable: bool,
+                  error: &str| AudioMetadata {
+            path: format!("{SHOT_SOURCE_DIR}/{file}"),
+            ext: file.rsplit('.').next().unwrap_or("").to_string(),
+            artist: artist.into(),
+            album: album.into(),
+            title: title.into(),
+            track: track.into(),
+            year: year.into(),
+            genre: genre.into(),
+            readable,
+            error: error.into(),
+        };
+        vec![
+            mk("陈奕迅 - 陪你度过漫长岁月.mp3", "陈奕迅", "准备中", "陪你度过漫长岁月", "03", "2015", "Pop", true, ""),
+            mk("陈奕迅 - 十年.flac", "陈奕迅", "黑·白·灰", "十年", "07", "2003", "Pop", true, ""),
+            mk("王菲 - 匆匆那年.flac", "王菲", "匆匆那年", "匆匆那年", "01", "2014", "原声带", true, ""),
+            mk("周杰伦 - 晴天.mp3", "周杰伦", "叶惠美", "晴天", "04", "2003", "Mandopop", true, ""),
+            mk("track05_corrupt.ogg", "Unknown Artist", "Unknown Album", "track05_corrupt", "0", "Unknown Year", "Unknown Genre", false, "Not a supported audio format"),
+        ]
+    }
+
+    /// [取证专用]把向导直接置为指定演示态。预览/进度态的映射与目录树都经
+    /// 真实 `service::generate_preview` 计算,保证截图忠实于实际代码路径。
+    /// 返回 false 表示状态名不被识别。调用方:`src/shot.rs`(T2F_SHOT_* 模式)。
+    #[doc(hidden)]
+    pub fn setup_shot_state(
+        &mut self,
+        state: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        // 预览/进度共用的整理批次(真实预览计算,Move 模式)
+        let preview_bundle = if state.starts_with("preview") || state == "progress" {
+            std::fs::create_dir_all(SHOT_TARGET_DIR).ok();
+            let req = PreviewRequest {
+                files: Self::shot_files(),
+                template: DEFAULT_TEMPLATE.to_string(),
+                target_dir: SHOT_TARGET_DIR.to_string(),
+                mode: OrganizeMode::Move,
+            };
+            match service::generate_preview(req) {
+                Ok(resp) => Some(resp),
+                Err(err) => {
+                    eprintln!("[shot] generate_preview 失败: {err}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        match state {
+            // 初始空态:构造默认即步骤 1 空表单,无需注入
+            "empty" => {}
+
+            // 步骤 1:已扫描出 5 个文件的表格态
+            "scan" => {
+                let files = Self::shot_files();
+                self.scan.dir.update(cx, |s, cx| {
+                    s.set_value(SHOT_SOURCE_DIR, window, cx);
+                });
+                self.scan.files.clone_from(&files);
+                self.scan.has_scanned = true;
+                self.scan.source_dir = SHOT_SOURCE_DIR.to_string();
+                self.scanned_files = files;
+                self.source_dir = SHOT_SOURCE_DIR.to_string();
+            }
+
+            // 步骤 2:含映射表/目录树/统计卡的完整预览态(真实预览计算)
+            "preview" | "preview_tree" => {
+                let Some(resp) = preview_bundle else { return false };
+                self.scan.dir.update(cx, |s, cx| {
+                    s.set_value(SHOT_SOURCE_DIR, window, cx);
+                });
+                self.scan.files = Self::shot_files();
+                self.scan.has_scanned = true;
+                self.scan.source_dir = SHOT_SOURCE_DIR.to_string();
+                self.scanned_files = Self::shot_files();
+                self.source_dir = SHOT_SOURCE_DIR.to_string();
+
+                self.preview.dir.update(cx, |s, cx| {
+                    s.set_value(SHOT_TARGET_DIR, window, cx);
+                });
+                self.preview.mode = OrganizeMode::Move;
+                self.preview.mappings = resp.mappings.clone();
+                self.preview.directory_tree = resp.directory_tree;
+                self.preview.resolved_target_dir = resp.target_dir.clone();
+                self.preview.active_tab = if state == "preview_tree" {
+                    PreviewTab::Tree
+                } else {
+                    PreviewTab::List
+                };
+                self.preview.form_template = DEFAULT_TEMPLATE.to_string();
+                self.preview.form_target_dir = SHOT_TARGET_DIR.to_string();
+                self.current_step = 2;
+                self.max_unlocked_step = 2;
+            }
+
+            // 步骤 3:进度 60%(3/5)+ 若干日志行的执行态
+            "progress" => {
+                let Some(resp) = preview_bundle else { return false };
+                let total = resp.mappings.len().max(1);
+                let current = (total * 3) / 5; // 60%
+                let mappings = resp.mappings.clone();
+                let mut log = Vec::new();
+                for (idx, m) in mappings.iter().enumerate().take(current) {
+                    // 忠实于 apply_task_snapshot 的行形状:每文件两条
+                    // `[start_i/total]` 与 `[done_i/total]`(current_file 恒非空)
+                    let name = basename(&m.source);
+                    log.push(format!("[{}/{}] {}", idx, total, name));
+                    log.push(format!("[{}/{}] {}", idx + 1, total, name));
+                }
+                self.organize_mappings = mappings.clone();
+                self.organize_mode = OrganizeMode::Move;
+                self.organize_target_dir = SHOT_TARGET_DIR.to_string();
+                self.progress.started = true;
+                self.progress.progress = Some(ProgressEvent {
+                    task_id: "shot-task".to_string(),
+                    status: TaskStatus::Running,
+                    current,
+                    total,
+                    current_file: mappings
+                        .get(current)
+                        .map(|m| m.source.clone())
+                        .unwrap_or_default(),
+                    message: format!("Processed {current}/{total}"),
+                });
+                self.progress.log = log;
+                self.current_step = 3;
+                self.max_unlocked_step = 3;
+            }
+
+            _ => return false,
+        }
+        cx.notify();
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3288,7 +3473,7 @@ mod tests {
     /// boundary_error / write_error;保留 ok/conflict/batch_conflict/missing_metadata
     #[test]
     fn organizable_filter_excludes_blocked_statuses() {
-        let mappings = vec![
+        let mappings = [
             mapping(MappingStatus::Ok),
             mapping(MappingStatus::Conflict),
             mapping(MappingStatus::BatchConflict),
@@ -3414,33 +3599,5 @@ mod tests {
         std::fs::write(&path, "not json").unwrap();
         assert_eq!(read_state_file(&path), "");
         let _ = std::fs::remove_dir_all(&dir);
-    }
-}
-
-// ── 窗口关闭确认挂接 ─────────────────────────────────────────────────────────
-//
-// gpui 0.2.2 存在 `window.on_window_should_close(cx, f)`(返回 false 可阻止关闭),
-// 因此源项目的关闭确认弹窗(SPEC 1.5)可以等价实现,不列入 KNOWN_DIFFERENCES。
-
-impl AppShell {
-    /// 在窗口根视图构建后调用(见 main.rs):注册"点关闭按钮先确认"。
-    /// 确认 → `exit_confirmed = true` + `cx.quit()`;取消 → 不动作。
-    pub fn register_close_guard(
-        shell: &Entity<AppShell>,
-        window: &mut Window,
-        cx: &mut gpui::App,
-    ) {
-        let weak = shell.downgrade();
-        window.on_window_should_close(cx, move |window, cx: &mut gpui::App| {
-            weak.update(cx, |this, cx| {
-                if this.exit_confirmed {
-                    true // 已确认,放行
-                } else {
-                    this.open_exit_confirm(window, cx);
-                    false // 拦下本次关闭,等待确认
-                }
-            })
-            .unwrap_or(true) // 实体已释放(不应发生)则放行
-        });
     }
 }

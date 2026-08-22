@@ -452,14 +452,12 @@ pub fn preflight_check(
         // 1c. MOVE 模式下同一源不能出现两次：第一条映射会把文件移走，
         //     第二条会因 ENOENT 失败，造成预检本应阻止的部分执行
         let src_key = path_util::resolve_lenient(src).to_string_lossy().into_owned();
-        if mode == OrganizeMode::Move {
-            if !seen_sources.insert(src_key) {
-                errors.push(format!(
-                    "Duplicate source in move batch (file can only be moved once): {}",
-                    mapping.source
-                ));
-                continue;
-            }
+        if mode == OrganizeMode::Move && !seen_sources.insert(src_key) {
+            errors.push(format!(
+                "Duplicate source in move batch (file can only be moved once): {}",
+                mapping.source
+            ));
+            continue;
         }
 
         // 2d. COPY 模式下的仅大小写重命名意味着源与目标是同一文件
@@ -668,7 +666,7 @@ mod tests {
         write_bytes(&src, b"audio");
 
         let src_str = src.to_string_lossy().into_owned();
-        let result = plan_targets(&[src_str.clone()], Some(&[src_str.clone()]));
+        let result = plan_targets(std::slice::from_ref(&src_str), Some(std::slice::from_ref(&src_str)));
         assert_eq!(
             result[0], src_str,
             "原地整理目标必须保持路径不变，得到 {result:?}"
