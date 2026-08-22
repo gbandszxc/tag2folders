@@ -482,7 +482,7 @@ impl RenderOnce for ConfirmModal {
                     }),
             );
 
-        // 取消 secondary minWidth 76、确认(变体随 tone)minWidth 88
+        // 取消 secondary minWidth 76、确认(变体随 tone)minWidth 88 — 用固定 w+flex_none 防止点按帧布局抖动
         let footer = div()
             .flex()
             .justify_end()
@@ -500,15 +500,18 @@ impl RenderOnce for ConfirmModal {
                     .on_click(move |_, w, cx| on_cancel(w, cx)),
             )
             .child(
-                Button::new("confirm-ok")
-                    .label(self.options.confirm_text.clone())
-                    .variant(confirm_variant)
-                    .min_w(px(88.0))
-                    .loading(loading)
-                    .on_click(move |_, w, cx| on_confirm(w, cx)),
+                div()
+                    .w(px(88.0))
+                    .flex_none()
+                    .child(
+                        Button::new("confirm-ok")
+                            .label(self.options.confirm_text.clone())
+                            .variant(confirm_variant)
+                            .min_w(px(88.0))
+                            .loading(loading)
+                            .on_click(move |_, w, cx| on_confirm(w, cx)),
+                    ),
             );
-
-        // 卡片:focus 句柄接住键盘(escape/enter),入场动画(源 scaleUp → 退化 opacity)
         let card = div()
             .id("confirm-card")
             .track_focus(&self.focus_handle)
