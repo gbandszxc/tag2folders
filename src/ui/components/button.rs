@@ -61,6 +61,7 @@ pub struct Button {
     size: ButtonSize,
     min_width: Option<Pixels>,
     height: Option<Pixels>,
+    h_full: bool,
     pad_x: Option<Pixels>,
     pad_y: Option<Pixels>,
     text_size: Option<Pixels>,
@@ -80,6 +81,7 @@ impl Button {
             size: ButtonSize::default(),
             min_width: None,
             height: None,
+            h_full: false,
             pad_x: None,
             pad_y: None,
             text_size: None,
@@ -133,9 +135,16 @@ impl Button {
     /// 覆盖高度(DirPicker 浏览按钮 height:38)。
     pub fn h(mut self, h: Pixels) -> Self {
         self.height = Some(h);
+        self.h_full = false;
         self
     }
 
+    /// 填满父容器垂直高度(与同行的Input完美拉伸对齐)。
+    pub fn h_full(mut self) -> Self {
+        self.h_full = true;
+        self.height = None;
+        self
+    }
     /// 覆盖水平内边距(DirPicker 浏览按钮 padding 0 16px)。
     pub fn pad_x(mut self, x: Pixels) -> Self {
         self.pad_x = Some(x);
@@ -241,10 +250,11 @@ impl RenderOnce for Button {
             None
         };
 
-        let pad_y_to_apply = match (self.pad_y, self.height) {
-            (Some(y), _) => Some(y),
-            (None, Some(_)) => None, // 已指定固定高度，不额外加垂直padding，避免在taffy中被撑大
-            (None, None) => Some(pad_y),
+        let pad_y_to_apply = match (self.pad_y, self.height, self.h_full) {
+            (Some(y), _, _) => Some(y),
+            (None, Some(_), _) => None, // 已指定固定高度，不额外加垂直padding
+            (None, None, true) => None, // 占满父容器高度，由垂直居中处理
+            (None, None, false) => Some(pad_y),
         };
 
         let mut btn = div()
@@ -257,6 +267,7 @@ impl RenderOnce for Button {
             .when(!self.pad_x.is_some(), |el| el.px(pad_x))
             .when_some(pad_y_to_apply, |el, y| el.py(y))
             .when_some(self.height, |el, h| el.h(h))
+            .when(self.h_full, |el| el.h_full())
             .when_some(self.min_width, |el, w| el.min_w(w))
             .when_some(self.text_size, |el, s| el.text_size(s))
             .when(self.text_size.is_none(), |el| el.text_size(font_size))

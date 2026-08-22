@@ -333,7 +333,7 @@ pub fn render_dir_picker(
             .label("浏览...")
             .variant(ButtonVariant::Secondary)
             .size(ButtonSize::Md)
-            .h(px(38.0))
+            .h_full()
             .pad_x(px(16.0))
             .icon(Icon::FolderOpen, px(15.0))
             .disabled(disabled)
@@ -344,7 +344,6 @@ pub fn render_dir_picker(
 
     let row = div()
         .flex()
-        .items_center()
         .gap(px(8.0))
         .child(input_field)
         .child(browse_btn);
