@@ -289,57 +289,43 @@ pub fn render_dir_picker(
         );
     }
 
-    // 输入框容器:relative + 左侧 FolderIcon 16 @ left 10 + 清空按钮 @ right 8
-    // 先渲染 Input，再渲染 absolute 图标/清空，避免 Input 背景盖住图标
-    let input_container = div()
-        .relative()
-        .flex_1()
-        .min_w(px(0.0))
-        .h(px(38.0))
-        .child(
-            Input::new(&state.input)
-                .h(px(38.0))
-                .py(px(0.0))
-                .pl(px(34.0))
-                .pr(if has_value && !disabled { px(32.0) } else { px(12.0) })
-                .text_size(px(13.0))
-                .font_family(theme::FONT_MONO)
-                .disabled(disabled),
-        )
-        .child(
-            div()
-                .absolute()
-                .left(px(10.0))
-                .top(px(0.0))
-                .bottom(px(0.0))
-                .flex()
-                .items_center()
-                .child(icon_sized(Icon::Folder, px(16.0)).text_color(icon_color)),
-        )
-        .when(has_value && !disabled, |el| {
-            let dp2 = dp.clone();
-            el.child(
+    // 输入框:直接使用 Input 的 prefix 和 suffix，由 Input 内部 Flex 引擎自动垂直居中
+    let input_field = {
+        let dp2 = dp.clone();
+        Input::new(&state.input)
+            .flex_1()
+            .min_w(px(0.0))
+            .h(px(38.0))
+            .py(px(0.0))
+            .prefix(
                 div()
-                    .id("dir-clear")
-                    .absolute()
-                    .right(px(8.0))
-                    .top(px(0.0))
-                    .bottom(px(0.0))
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .p(px(4.0))
-                    .rounded(theme::RADIUS_SM)
-                    .text_color(theme::SLATE_400)
-                    .cursor_pointer()
-                    .hover(|st| st.text_color(theme::SLATE_600))
-                    .child(icon_sized(Icon::X, px(14.0)).text_color(theme::SLATE_400))
-                    .on_click(move |_, window, cx| {
-                        dp2.update(cx, |state, cx| state.clear(window, cx));
-                    }),
+                    .pl(px(4.0))
+                    .child(icon_sized(Icon::Folder, px(16.0)).text_color(icon_color)),
             )
-        });
-
+            .when(has_value && !disabled, |this| {
+                this.suffix(
+                    div()
+                        .id("dir-clear")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .p(px(2.0))
+                        .rounded(theme::RADIUS_SM)
+                        .text_color(theme::SLATE_400)
+                        .cursor_pointer()
+                        .hover(|st| st.text_color(theme::SLATE_600))
+                        .child(icon_sized(Icon::X, px(14.0)).text_color(theme::SLATE_400))
+                        .on_click(move |_, window, cx| {
+                            dp2.update(cx, |state, cx| state.clear(window, cx));
+                        }),
+                )
+            })
+            .text_size(px(13.0))
+            .font_family(theme::FONT_MONO)
+            .disabled(disabled)
+    };
     // 浏览按钮:secondary、h 38、px 16、weight 600、FolderOpenIcon 15 色 amber-700
     let browse_btn = {
         let dp2 = dp.clone();
@@ -360,7 +346,7 @@ pub fn render_dir_picker(
         .flex()
         .items_center()
         .gap(px(8.0))
-        .child(input_container)
+        .child(input_field)
         .child(browse_btn);
     col = col.child(row);
 
