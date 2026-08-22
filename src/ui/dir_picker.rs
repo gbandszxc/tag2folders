@@ -295,8 +295,7 @@ pub fn render_dir_picker(
         Input::new(&state.input)
             .flex_1()
             .min_w(px(0.0))
-            .h(px(38.0))
-            .py(px(0.0))
+            .h_full()
             .prefix(
                 div()
                     .flex()
@@ -326,7 +325,7 @@ pub fn render_dir_picker(
             .font_family(theme::FONT_MONO)
             .disabled(disabled)
     };
-    // 浏览按钮:secondary、h 38、px 16、weight 600、FolderOpenIcon 15 色 amber-700
+    // 浏览按钮:secondary、h_full、px 16、weight 600、FolderOpenIcon 15 色 amber-700
     let browse_btn = {
         let dp2 = dp.clone();
         Button::new("dir-browse")
@@ -344,11 +343,11 @@ pub fn render_dir_picker(
 
     let row = div()
         .flex()
+        .h(px(38.0))
         .gap(px(8.0))
         .child(input_field)
         .child(browse_btn);
     col = col.child(row);
-
     if let Some(error) = state.error.clone() {
         col = col.child(
             div()
