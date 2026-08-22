@@ -1,3 +1,7 @@
+// Windows GUI 子系统:双击/快捷方式启动不分配控制台(无终端窗口)。
+// stderr 句柄若被父进程显式提供仍可写入,不影响 shot 取证的 eprintln!。
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! Tag2Folders GPUI 版入口。
 //!
 //! - 窗口参数照抄 SPEC 1.1:标题 `Tag2Folders`、1100×750、最小 900×600、可缩放

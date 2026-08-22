@@ -7,6 +7,10 @@ license = "MIT"
 edition = "2021"
 rust-version = "1.85"
 
+[build-dependencies]
+# Windows:exe 资源段嵌入 app.ico(见 build.rs),仅 windows 目标生效
+winresource = "0.1"
+
 [lib]
 name = "tag2folders_lib"
 path = "src/lib.rs"

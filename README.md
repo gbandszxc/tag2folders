@@ -25,8 +25,12 @@
 ├── assets/
 │   ├── icons/*.svg         # 33 图标（含 check/circle-x）
 │   ├── AppIcon.icns        # .app 图标
+│   ├── app.ico             # Windows 图标（多尺寸,exe 资源 + MSI/ARP 共用）
 │   └── app-icon.svg        # 源
-├── scripts/build-dmg.sh    # hdiutil/iconutil/codesign → .app → .dmg（不引 cargo-bundle）
+├── scripts/
+│   ├── build-dmg.sh        # hdiutil/iconutil/codesign → .app → .dmg（不引 cargo-bundle）
+│   ├── build-msi.ps1       # cargo + WiX v5 → .msi（自动下载缓存 wix-cli,免管理员）
+│   └── tag2folders.wxs     # MSI 包定义（WiX v5 语法）
 ├── docs/
 │   ├── SOURCE_SPEC.md      # 源项目全量规格（唯一 UI 依据）
 │   ├── GPUI_NOTES.md       # gpui 选型/坑位

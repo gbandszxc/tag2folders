@@ -1,3 +1,10 @@
+# 打包
+
+| 平台 | 脚本 | 产物 |
+| --- | --- | --- |
+| macOS | `scripts/build-dmg.sh` | `target/dmg/tag2folders_<version>_<arch>.dmg` |
+| Windows | `scripts/build-msi.ps1` | `target/msi/tag2folders_<version>_<arch>.msi` |
+
 # macOS DMG 打包
 
 打包流程完全脚本化:`scripts/build-dmg.sh`,只依赖 macOS 系统自带工具
@@ -83,3 +90,60 @@ T2F_SKIP_BUILD=1 T2F_BIN=/tmp/tag2folders-universal scripts/build-dmg.sh
 - 2026-08-22:从 HEAD(8877339)构建,DMG 挂载后 bundle 结构/Info.plist/签名校验通过,
   从挂载卷直接运行 app 成功创建窗口并正常退出;
   图标与原项目 `src-tauri/icons/icon.icns` 各尺寸像素差 0.0000/255。
+
+# Windows MSI 打包
+
+打包流程同样脚本化:`scripts/build-msi.ps1` + `scripts/tag2folders.wxs`(WiX v5 语法)。
+WiX 不在 PATH 时脚本自动下载官方 wix-cli MSI 到
+`%LOCALAPPDATA%\tag2folders\wix-cli\<version>` 并以 `msiexec /a` 免管理员解包使用,
+仅需 .NET 运行时(无需 .NET SDK)。不引入 cargo-wix(绑死已停止支持的 WiX v3)。
+
+```powershell
+powershell -File scripts\build-msi.ps1                # 常规:cargo build --release 后打包
+$env:T2F_SKIP_BUILD=1; powershell ...                 # 跳过构建,复用 target/release/tag2folders.exe
+$env:T2F_BIN='D:\path\tag2folders.exe'; powershell ... # 用指定二进制打包(如 CI 产物)
+$env:T2F_WIX='D:\path\wix.exe'; powershell ...         # 用指定 wix.exe
+```
+
+产物:`target\msi\tag2folders_<version>_<arch>.msi`(arch 取自 rustc host:x64 / arm64)。
+
+## 内容
+
+- `C:\Program Files\Tag2Folders\`:主程序 + `app.ico`;
+- 开始菜单 `Tag2Folders` 快捷方式(per-machine);
+- 控制面板“应用”条目(ARP)带产品图标,不可“修改”只可卸载;
+- `MajorUpgrade(AllowSameVersionUpgrades)` + 固定 `UpgradeCode`:高版本覆盖升级,
+  同版本号也可覆盖安装(开发期反复重打 MSI),拒绝降级。
+
+## exe 图标
+
+`build.rs` 用 `winresource` 把 `assets/app.ico` 嵌入 exe 资源段(资源管理器/任务栏/窗口图标),
+仅 windows 目标生效。`app.ico` 缺失时 `build-msi.ps1` 会用 System.Drawing 从
+`assets/app-icon.png` 重建(256px 档 PNG 压缩),但建议直接提交缓存文件
+(当前仓库版由 python+PIL Lanczos 生成,与 macOS icns 管线同源)。
+
+## 安装/卸载验证(2026-08-22)
+
+从 HEAD 构建 `tag2folders_2.0.1_x64.msi`(5.3 MB):
+- `msiexec /i ... /qn` 静默安装成功,文件/开始菜单/ARP 齐全;
+- `msiexec /a` 管理员映像自校验通过(脚本内建);
+- 与旧 Tauri 版 MSI(同目录、不同 UpgradeCode)共存时文件互不干扰,
+  卸载 Tauri 后 `msiexec /i ... REINSTALL=ALL REINSTALLMODE=amus /qn`
+  可完整修复被共享 KeyPath 带走的文件。
+
+## 无控制台窗口 / libpng warning(2026-08-22)
+
+现象:双击启动自带终端窗口,持续打印 `libpng warning: iCCP: known incorrect sRGB profile`。
+
+定位(对照实验,同 exe 同 cwd 复现 0/51 行漂移):
+- 项目依赖树只有纯 Rust `png` crate(0.17/0.18),registry 源码中无该 warning 文本;
+- 进程模块表显示搜狗输入法注入 DLL(PicFace64 等,内嵌 C libpng)与系统
+  IconCodecService.dll —— warning 来自外部注入组件写 stderr,非本项目代码;
+- 终端窗口本体是 Rust 默认 console 子系统:双击启动时 Windows 自动分配控制台。
+
+修复:`src/main.rs` 顶部 `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`
+(仅 release,debug 保留控制台看日志)。GUI 子系统不分配控制台 → 无窗口、warning 无处显示;
+显式重定向 stderr 时句柄仍继承,不影响 `shot.rs` 取证的 `eprintln!`。
+
+验证:安装版 PE 头 `Subsystem=2(GUI)`;启动后 EnumWindows 仅 `Zed::Window` + 输入法窗口,
+无 `ConsoleWindowClass`。

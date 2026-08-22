@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  tag2folders Windows MSI 包定义（WiX Toolset v5 语法）。
+  预处理器变量由 scripts/build-msi.ps1 经 `wix build -d` 传入:
+    Version   取自 Cargo.toml
+    BinFile   target/release/tag2folders.exe
+    IconFile  assets/app.ico
+  UpgradeCode 固定不变,保证版本升级时正确替换旧安装。
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Tag2Folders"
+      Manufacturer="gbandszxc"
+      Version="$(var.Version)"
+      UpgradeCode="4C3468EA-0553-437E-B525-99607094BC8A">
+
+    <SummaryInformation Description="基于音频元数据标签自动整理文件的桌面工具" />
+
+    <!-- 同版本号也允许覆盖安装(开发期反复重打 MSI;正式发版版本号必递增) -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="已安装更高版本的 [ProductName]，无法降级安装。" />
+
+
+    <!-- 单内嵌 cab,产物 MSI 自包含 -->
+    <MediaTemplate EmbedCab="yes" />
+    <!-- 控制面板“应用”条目图标(Icon Id 需以 .exe 结尾才被 ARP 使用) -->
+    <Icon Id="Tag2Folders.exe" SourceFile="$(var.IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="Tag2Folders.exe" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!-- 1) Program Files\Tag2Folders:主程序 + 图标 -->
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLDIR" Name="Tag2Folders">
+        <Component Id="MainExe">
+          <File Id="Tag2FoldersExe" Source="$(var.BinFile)" Name="tag2folders.exe" KeyPath="yes" />
+        </Component>
+        <Component Id="AppIcon">
+          <File Id="AppIcoFile" Source="$(var.IconFile)" Name="app.ico" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <!-- 2) 开始菜单快捷方式(每用户;HKCU 作 KeyPath) -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuDir" Name="Tag2Folders">
+        <Component Id="StartMenuShortcut">
+          <Shortcut
+              Id="AppShortcut"
+              Name="Tag2Folders"
+              Description="基于音频元数据标签自动整理文件的桌面工具"
+              Target="[INSTALLDIR]tag2folders.exe"
+              WorkingDirectory="INSTALLDIR"
+              Icon="Tag2Folders.exe" />
+          <RemoveFolder Id="RemoveAppMenuDir" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\gbandszxc\Tag2Folders"
+                         Name="installed" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Tag2Folders" Level="1">
+      <ComponentRef Id="MainExe" />
+      <ComponentRef Id="AppIcon" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>

@@ -18,11 +18,13 @@
 //! layout/prepaint/paint,不产出可读的逐像素缓冲(见 docs/T1_FINDINGS.md)。
 //! 真窗口 + 自窗口截取是唯一能拿到忠实像素的路线。
 
+#[cfg(target_os = "macos")]
 use std::ffi::c_void;
 use std::path::Path;
 use std::time::Duration;
 
 use gpui::{App, AppContext, Entity};
+#[cfg(target_os = "macos")]
 use image::RgbaImage;
 
 use crate::app::AppShell;
@@ -103,6 +105,7 @@ pub fn maybe_run_shot_session(
 
 // ── CoreGraphics FFI(仅用到 C 符号,不引 objc 绑定 crate)───────────────────
 
+#[cfg(target_os = "macos")]
 mod cg {
     #![allow(non_snake_case, dead_code)]
 
@@ -185,6 +188,7 @@ mod cg {
     }
 }
 
+#[cfg(target_os = "macos")]
 /// 从 CFDictionary 读 CFNumber 为 f64。
 #[allow(dead_code)]
 unsafe fn dict_f64(dict: cg::CFDictionaryRef, key: &str) -> Option<f64> {
@@ -216,6 +220,7 @@ unsafe fn dict_f64(dict: cg::CFDictionaryRef, key: &str) -> Option<f64> {
 /// - 自身窗口的 bounds 字段会被 redact,因此**不能**按尺寸挑——
 ///   CGWindowListCopyWindowInfo 返回按前后(z)排序,取第一个本进程窗口
 ///   即最前面的(激活后的主窗口)。
+#[cfg(target_os = "macos")]
 unsafe fn find_our_window() -> Option<u32> {
     let list = cg::CGWindowListCopyWindowInfo(0, 0);
     if list.is_null() {
@@ -273,6 +278,7 @@ unsafe fn find_our_window() -> Option<u32> {
 //   "available to capture by current process without user consent via TCC",
 //   截自有窗口无需任何权限 —— 本模块即走此路。
 
+#[cfg(target_os = "macos")]
 mod sck {
     #![allow(non_snake_case, non_camel_case_types, dead_code, clashing_extern_declarations)]
 
@@ -318,6 +324,7 @@ mod sck {
     }
 }
 
+#[cfg(target_os = "macos")]
 use std::sync::mpsc;
 
 /// 调用一个以 (obj, err) 回调的 async Objective-C 方法并阻塞等待结果。
@@ -325,6 +332,7 @@ use std::sync::mpsc;
 /// Block 用依赖树内已有的 `block` crate 构造(真·堆块,含 copy/dispose
 /// 助手;手写全局块会破坏 ScreenCaptureKit 内部的块簿记,实测导致
 /// `_Block_release` 释放已捕获对象时崩溃,见 T1_FINDINGS.md)。
+#[cfg(target_os = "macos")]
 unsafe fn sck_call_async(
     receiver: sck::id,
     selector: &str,
@@ -359,10 +367,8 @@ unsafe fn sck_call_async(
 }
 
 /// 截取本进程主窗口并写 PNG。返回 (宽, 高)(像素)。
+#[cfg(target_os = "macos")]
 pub fn capture_window_png(path: &Path) -> Result<(u32, u32), String> {
-    if !cfg!(target_os = "macos") {
-        return Err("仅支持 macOS".to_string());
-    }
     unsafe {
         // 触发 ScreenCaptureKit 链接锚点
         let _ = sck::framework_anchor();
@@ -461,6 +467,7 @@ pub fn capture_window_png(path: &Path) -> Result<(u32, u32), String> {
     }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn sck_cls(name: &str) -> Result<sck::id, String> {
     let mut c = name.as_bytes().to_vec();
     c.push(0);
@@ -472,12 +479,14 @@ unsafe fn sck_cls(name: &str) -> Result<sck::id, String> {
     }
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn sck_sel(name: &str) -> sck::Sel {
     let mut c = name.as_bytes().to_vec();
     c.push(0);
     sck::sel_registerName(c.as_ptr())
 }
 
+#[cfg(target_os = "macos")]
 #[allow(dead_code)]
 /// AppKit:让主窗口真正上屏。
 /// CLI 启动的进程在 macOS 14+ 不允许自抢前台(activateIgnoringOtherApps
@@ -560,6 +569,7 @@ fn ensure_window_on_screen() {
 }
 
 /// 解码 CGImage 像素 → RGBA → PNG。
+#[cfg(target_os = "macos")]
 unsafe fn decode_and_save(image: cg::CGImageRef, path: &Path) -> Result<(u32, u32), String> {
     let width = cg::CGImageGetWidth(image) as u32;
     let height = cg::CGImageGetHeight(image) as u32;
@@ -620,4 +630,10 @@ unsafe fn decode_and_save(image: cg::CGImageRef, path: &Path) -> Result<(u32, u3
     img.save(path)
         .map_err(|err| format!("写 PNG 失败: {err}"))?;
     Ok((width, height))
+}
+
+// Windows/Linux:截图取证依赖 ScreenCaptureKit/CoreGraphics,不可用
+#[cfg(not(target_os = "macos"))]
+pub fn capture_window_png(_path: &Path) -> Result<(u32, u32), String> {
+    Err("截图取证仅支持 macOS".to_string())
 }
