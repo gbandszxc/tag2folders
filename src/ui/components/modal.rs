@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, FocusHandle, KeyDownEvent, MouseDownEvent,
-    MouseButton, Pixels, RenderOnce, SharedString, Window, deferred, div, px,
+    Animation, AnimationExt, AnyElement, App, ClickEvent, FocusHandle, KeyDownEvent, Pixels,
+    RenderOnce, SharedString, Window, deferred, div, px,
 };
 
 use crate::ui::theme;
@@ -218,18 +218,19 @@ impl RenderOnce for Modal {
             .justify_center()
             .p(px(20.0))
             .bg(theme::BG_OVERLAY)
-            .on_mouse_down(MouseButton::Left, {
+            .on_click({
                 let on_close = on_close_shared;
-                move |_: &MouseDownEvent, window: &mut Window, cx: &mut App| {
+                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
                     if close_on_overlay {
                         on_close(window, cx);
                     }
                 }
             })
             .child(
-                // 卡片捕获自身 mousedown,阻止“点内容 = 点遮罩”误关
+                // 卡片捕获自身 click,阻止“点内容 = 点遮罩”误关（与按钮同为 click 事件，hit 选最深，按钮优先）
                 div()
-                    .on_mouse_down(MouseButton::Left, |_: &MouseDownEvent, _: &mut Window, _: &mut App| {})
+                    .id("modal-card-capture")
+                    .on_click(|_: &ClickEvent, _: &mut Window, _: &mut App| {})
                     .child(card),
             );
 
@@ -396,14 +397,6 @@ impl RenderOnce for ConfirmModal {
                 _ => {}
             }
         };
-        let on_overlay = {
-            let r = on_result.clone();
-            move |_: &MouseDownEvent, w: &mut Window, cx: &mut App| {
-                if !loading {
-                    r(false, w, cx);
-                }
-            }
-        };
 
         // 正文区:padding 22px 24px 18px;左 40×40 语气图标徽章(圆角 12)+ 右内容
         let body = div()
@@ -489,7 +482,6 @@ impl RenderOnce for ConfirmModal {
                     }),
             );
 
-        // 底部:padding 12px 20px、slate-50 底、上边框、右对齐;
         // 取消 secondary minWidth 76、确认(变体随 tone)minWidth 88
         let footer = div()
             .flex()
@@ -553,14 +545,18 @@ impl RenderOnce for ConfirmModal {
             .items_center()
             .justify_center()
             .p(px(20.0))
-            .bg(theme::BG_OVERLAY)
-            .on_mouse_down(MouseButton::Left, on_overlay)
+            .on_click({
+                let r = on_result.clone();
+                move |_: &ClickEvent, w: &mut Window, cx: &mut App| {
+                    if !loading {
+                        r(false, w, cx);
+                    }
+                }
+            })
             .child(
                 div()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        |_: &MouseDownEvent, _: &mut Window, _: &mut App| {},
-                    )
+                    .id("confirm-card-capture")
+                    .on_click(|_: &ClickEvent, _: &mut Window, _: &mut App| {})
                     .child(card),
             );
 

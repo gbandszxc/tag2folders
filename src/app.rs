@@ -464,6 +464,7 @@ fn log_is_at_bottom(handle: &ScrollHandle) -> bool {
 
 // ── 确认弹窗状态 ─────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 enum ConfirmAction {
     /// 顶栏"重置"(SPEC 1.4)
     Reset,
@@ -1163,7 +1164,6 @@ impl AppShell {
         self.confirm_focus.focus(window);
         cx.notify();
     }
-
     fn handle_confirm(&mut self, ok: bool, window: &mut Window, cx: &mut Context<Self>) {
         let pending = match self.confirm.take() {
             Some(p) => p,
@@ -1174,6 +1174,7 @@ impl AppShell {
                 ConfirmAction::Reset => self.reset(window, cx),
                 ConfirmAction::Exit => {
                     self.exit_confirmed = true;
+                    window.remove_window();
                     cx.quit();
                 }
             }
