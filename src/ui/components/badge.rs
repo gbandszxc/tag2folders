@@ -20,7 +20,7 @@ pub enum BadgeVariant {
 
 impl BadgeVariant {
     /// (背景, 文字, 边框)
-    fn colors(self) -> (gpui::Rgba, gpui::Rgba, gpui::Rgba) {
+    pub fn colors(self) -> (gpui::Rgba, gpui::Rgba, gpui::Rgba) {
         match self {
             BadgeVariant::Emerald => (theme::EMERALD_50, theme::EMERALD_700, theme::EMERALD_200),
             BadgeVariant::Amber => (theme::AMBER_100, theme::AMBER_900, theme::AMBER_300),
@@ -30,7 +30,6 @@ impl BadgeVariant {
         }
     }
 }
-
 /// 徽章基座:`.badge` = inline-flex 居中、gap 4、padding 2px 8px、fontSize 11、
 /// weight 600、圆角 full、line-height 1.4、nowrap。调用方继续链样式覆盖
 /// (如版本徽章 padding 4px 10px / fontSize 11.5)。
@@ -134,12 +133,13 @@ impl RenderOnce for StatusBadge {
             StatusBadgeSize::Md => (px(2.0), px(8.0), px(12.0), px(13.0)),
             StatusBadgeSize::Sm => (px(1.0), px(6.0), px(11.0), px(12.0)),
         };
+        let (_, fg, _) = variant.colors();
         let mut el = badge(variant)
             .px(pad_x)
             .py(pad_y)
             .text_size(font_size)
             // 源组件 title 属性 = label(gpui 无原生 tooltip,悬浮提示为已知差异)
-            .when(self.show_icon, |el| el.child(icon_sized(icon, icon_size)));
+            .when(self.show_icon, |el| el.child(icon_sized(icon, icon_size).text_color(fg)));
         el = el.child(label);
         el
     }

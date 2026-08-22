@@ -139,8 +139,7 @@ impl RenderOnce for Modal {
                 .rounded(theme::RADIUS_SM)
                 .text_color(theme::SLATE_400)
                 .cursor_pointer()
-                .hover(|st| st.bg(theme::SLATE_100))
-                .child(icon_sized(Icon::X, px(18.0)))
+                .child(icon_sized(Icon::X, px(18.0)).text_color(theme::SLATE_400))
                 .on_click(move |_, window, cx| on_close(window, cx))
         };
         header = header.child(title_row).child(on_close_btn);

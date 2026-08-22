@@ -290,17 +290,11 @@ pub fn render_dir_picker(
     }
 
     // 输入框容器:relative + 左侧 FolderIcon 16 @ left 10 + 清空按钮 @ right 8
+    // 先渲染 Input，再渲染 absolute 图标/清空，避免 Input 背景盖住图标
     let input_container = div()
         .relative()
         .flex_1()
         .min_w(px(0.0))
-        .child(
-            div()
-                .absolute()
-                .left(px(10.0))
-                .top(px(11.0))
-                .child(icon_sized(Icon::Folder, px(16.0)).text_color(icon_color)),
-        )
         .child(
             Input::new(&state.input)
                 .h(px(38.0))
@@ -309,6 +303,13 @@ pub fn render_dir_picker(
                 .text_size(px(13.0))
                 .font_family(theme::FONT_MONO)
                 .disabled(disabled),
+        )
+        .child(
+            div()
+                .absolute()
+                .left(px(10.0))
+                .top(px(11.0))
+                .child(icon_sized(Icon::Folder, px(16.0)).text_color(icon_color)),
         )
         .when(has_value && !disabled, |el| {
             let dp2 = dp.clone();
@@ -326,7 +327,7 @@ pub fn render_dir_picker(
                     .text_color(theme::SLATE_400)
                     .cursor_pointer()
                     .hover(|st| st.text_color(theme::SLATE_600))
-                    .child(icon_sized(Icon::X, px(14.0)))
+                    .child(icon_sized(Icon::X, px(14.0)).text_color(theme::SLATE_400))
                     .on_click(move |_, window, cx| {
                         dp2.update(cx, |state, cx| state.clear(window, cx));
                     }),
@@ -349,7 +350,12 @@ pub fn render_dir_picker(
             })
     };
 
-    let row = div().flex().gap(px(8.0)).child(input_container).child(browse_btn);
+    let row = div()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .child(input_container)
+        .child(browse_btn);
     col = col.child(row);
 
     if let Some(error) = state.error.clone() {

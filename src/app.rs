@@ -1800,7 +1800,7 @@ impl AppShell {
                     .on_click(move |_, window, cx| on_field(&field, window, cx)),
             );
         }
-        // 关键词输入:左内嵌 SearchIcon 13 @ left 9、h 32、fontSize 12.5、pl 28
+        // 关键词输入:左内嵌 SearchIcon 13 @ left 9、h 32、fontSize 12.5、pl 28 — 先渲染Input再渲染icon避免被盖
         filter_bar = filter_bar
             .child(
                 div()
@@ -1810,6 +1810,12 @@ impl AppShell {
                     .flex_basis(px(160.0))
                     .min_w(px(140.0))
                     .child(
+                        Input::new(&self.scan.filter_input)
+                            .h(px(32.0))
+                            .pl(px(28.0))
+                            .text_size(px(12.5)),
+                    )
+                    .child(
                         div()
                             .absolute()
                             .left(px(9.0))
@@ -1817,12 +1823,6 @@ impl AppShell {
                             .child(
                                 icon_sized(Icon::Search, px(13.0)).text_color(theme::SLATE_400),
                             ),
-                    )
-                    .child(
-                        Input::new(&self.scan.filter_input)
-                            .h(px(32.0))
-                            .pl(px(28.0))
-                            .text_size(px(12.5)),
                     ),
             )
             .when(show_clear, |el| {
@@ -2771,12 +2771,13 @@ impl Render for AppShell {
 /// 看板计数胶囊(SPEC 4.1.4 StatPill):badge 加强版,padding 6px 12px、fontSize 12、
 /// gap 7;label opacity 0.75 / weight 500,数值 13.5 / weight 700。
 fn stat_pill(variant: BadgeVariant, icon: Icon, label: &str, value: usize) -> gpui::Div {
+    let (_, fg, _) = variant.colors();
     badge(variant)
         .gap(px(7.0))
         .px(px(12.0))
         .py(px(6.0))
         .text_size(px(12.0))
-        .child(icon_sized(icon, px(13.0)))
+        .child(icon_sized(icon, px(13.0)).text_color(fg))
         .child(
             div()
                 .opacity(0.75)
