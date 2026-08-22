@@ -2129,14 +2129,14 @@ impl AppShell {
         }
         let template_block = div()
             .child(field_label("命名模板"))
-            .child(
-                Input::new(&self.preview.template_input)
-                    .h(px(38.0))
-                    .py(px(0.0))
+            .child({
+                let mut input = Input::new(&self.preview.template_input);
+                input.style().size.height = Some(px(38.0).into());
+                input
                     .px(px(12.0))
                     .text_size(px(13.0))
-                    .font_family(theme::FONT_MONO),
-            )
+                    .font_family(theme::FONT_MONO)
+            })
             .child(chips_row);
         // ── 4.2.2-3 操作模式 toggle + 移动警告条 ──
         let mut mode_block = div()

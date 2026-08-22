@@ -292,10 +292,11 @@ pub fn render_dir_picker(
     // 输入框:直接使用 Input 的 prefix 和 suffix，由 Input 内部 Flex 引擎自动垂直居中
     let input_field = {
         let dp2 = dp.clone();
-        Input::new(&state.input)
+        let mut input = Input::new(&state.input);
+        input.style().size.height = Some(px(38.0).into());
+        input
             .flex_1()
             .min_w(px(0.0))
-            .h_full()
             .prefix(
                 div()
                     .flex()
@@ -325,14 +326,14 @@ pub fn render_dir_picker(
             .font_family(theme::FONT_MONO)
             .disabled(disabled)
     };
-    // 浏览按钮:secondary、h_full、px 16、weight 600、FolderOpenIcon 15 色 amber-700
+    // 浏览按钮:secondary、h 38、px 16、weight 600、FolderOpenIcon 15 色 amber-700
     let browse_btn = {
         let dp2 = dp.clone();
         Button::new("dir-browse")
             .label("浏览...")
             .variant(ButtonVariant::Secondary)
             .size(ButtonSize::Md)
-            .h_full()
+            .h(px(38.0))
             .pad_x(px(16.0))
             .icon(Icon::FolderOpen, px(15.0))
             .disabled(disabled)
@@ -343,11 +344,12 @@ pub fn render_dir_picker(
 
     let row = div()
         .flex()
-        .h(px(38.0))
+        .items_center()
         .gap(px(8.0))
         .child(input_field)
         .child(browse_btn);
     col = col.child(row);
+
     if let Some(error) = state.error.clone() {
         col = col.child(
             div()
@@ -357,7 +359,6 @@ pub fn render_dir_picker(
                 .child(error),
         );
     }
-
     // 降级模态(打开时)
     let with_modal: gpui::AnyElement = if state.modal.open {
         render_browse_modal(dp, window, cx).into_any_element()
