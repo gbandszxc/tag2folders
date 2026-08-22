@@ -63,6 +63,9 @@ pub struct AlertBar {
     pre_wrap: bool,
     mt: Option<Pixels>,
     mb: Option<Pixels>,
+    /// 内边距覆盖(如 ScanPage 空结果条为 12px 16px,非默认 10px 14px)
+    pad_x: Option<Pixels>,
+    pad_y: Option<Pixels>,
 }
 
 impl AlertBar {
@@ -76,6 +79,8 @@ impl AlertBar {
             pre_wrap: false,
             mt: None,
             mb: None,
+            pad_x: None,
+            pad_y: None,
         }
     }
 
@@ -108,6 +113,18 @@ impl AlertBar {
         self.mb = Some(v);
         self
     }
+
+    /// 覆盖水平内边距(默认 14px)。
+    pub fn pad_x(mut self, v: Pixels) -> Self {
+        self.pad_x = Some(v);
+        self
+    }
+
+    /// 覆盖垂直内边距(默认 10px)。
+    pub fn pad_y(mut self, v: Pixels) -> Self {
+        self.pad_y = Some(v);
+        self
+    }
 }
 
 impl RenderOnce for AlertBar {
@@ -132,6 +149,8 @@ impl RenderOnce for AlertBar {
             .rounded(theme::RADIUS_MD)
             .when_some(self.mt, |el, v| el.mt(v))
             .when_some(self.mb, |el, v| el.mb(v))
+            .when_some(self.pad_x, |el, v| el.px(v))
+            .when_some(self.pad_y, |el, v| el.py(v))
             .child(icon_sized(icon, self.icon_size).text_color(icon_color))
             .child(
                 div()

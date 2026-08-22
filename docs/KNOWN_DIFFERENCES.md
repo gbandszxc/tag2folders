@@ -18,6 +18,8 @@ agent 接入真实 taskId。
 | 工作区 padding | `clamp(16px, 2.5vw, 32px)` | `24px` | 同上 |
 | 左步骤栏宽度 | `clamp(210px, 22vw, 250px)` | `230px` | 同上(1100 窗口下源值 242,最小 900 下源值 210;230 为折中,偏差 ≤12px) |
 | Modal maxHeight | `86vh` | `620px` | 无 vh;750 高窗口 86vh≈645,取保守值 |
+| 扫描页表格滚动模型 | 整页滚动 + `th position:sticky top:0` 表头吸顶 | 表头固定行 + **表体容器内滚动**(max-height 480px) | gpui 无 position:sticky;容器滚动 + 固定表头是等价可达的形态,超长列表不再撑高整页 |
+| 扫描页底部导航条 | `position: sticky; bottom: 0`(贴视口底) | 常规流元素(位于页面末尾) | 同上无 sticky;滚动到底部时视觉一致,滚动中途不悬浮 |
 
 ## 3. 动画降级
 
@@ -42,6 +44,7 @@ agent 接入真实 taskId。
 | 全局焦点环 | 源 `:focus-visible` amber 500 2px outline;gpui 焦点样式随组件库,未全局复刻 |
 | Enter 触发确认 | 已实现(ConfirmModal 卡片 on_key_down);与源的 autoFocus+原生按钮触发等价 |
 | 未解锁步骤 tabIndex | 源 tabIndex 0/-1 键盘可达;gpui 无 Tab 序精细控制(组件库统一 Tab 遍历),点击规则一致 |
+| 递归扫描复选框 | 源为原生 `<input type="checkbox">`(浏览器/系统绘制) | gpui-component `Checkbox`(自绘方框+对勾,换肤后主色 amber-500);行为等价(点整行切换、切换即触发作废效应) |
 
 ## 5. 其他
 
