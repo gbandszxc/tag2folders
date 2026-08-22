@@ -5772,6 +5772,7 @@ dependencies = [
  "dirs 5.0.1",
  "dunce",
  "filetime",
+ "futures",
  "gpui",
  "gpui-component",
  "libc",

@@ -114,3 +114,53 @@ warning: build failed, waiting for other jobs to finish...
 - task_id 持久化（dirs 数据目录）在 UI agent 接入时实现。
 - 窗口关闭确认（源 onCloseRequested，SPEC 1.5）需 gpui 侧等价钩子，
   由 UI agent 处理。
+
+## 7. D2(UI 基建)决策记录(2026-08-22)
+
+### 7.1 SVG 图标着色机制结论(源码已验证)
+
+读 gpui 0.2.2 `src/svg_renderer.rs` + `src/elements/svg.rs` 确认:gpui 渲染 SVG
+的管线是 ① AssetSource 加载字节 → ② usvg/resvg 光栅化 → ③ **pixmap 降为纯
+alpha 遮罩(颜色信息全部丢弃)** → ④ 绘制时用元素 `style.text.color` 上色。
+因此:
+
+- SVG 文件统一写 `stroke="currentColor"`(usvg 解析为不透明黑,只有 alpha 进遮罩);
+- **图标换色 = `.text_color(色)`,无需按颜色生成 SVG 变体**;
+- `assets/icons/*.svg` 32 个(SPEC 2.1 全量)+ `circle-x.svg`(gpui-component
+  Input 清空按钮需要;`check.svg` 双用于 Checkbox)。AssetSource 为
+  **编译期内嵌(include_str!)+ fs 回退**,二进制自包含。
+
+### 7.2 组件采用策略(实际落地)
+
+- **gpui-component 仅用于高交互件**:本轮实际使用 `Input`(gpui-component 0.5.1)、
+  `InputState`、`Root`(窗口根视图必须);主题经 `Theme::global_mut(cx)` 覆盖
+  `ThemeColor`(primary=amber-500、ring=amber-500、danger=rose-600、
+  success=emerald-600、info=sky-600、radius=8px、字体 PingFang SC/Menlo 等,
+  见 `ui::theme::apply_to_gpui_component`)。Checkbox/Select 留给页面 agent,
+  资产(check.svg)已备好;
+- 其余全部 div 自绘:Button/Badge/StatusBadge/Card/AlertBar/ProgressBar/StepNav/
+  Modal/ConfirmModal(`src/ui/components/`),数值照抄 SPEC。
+
+### 7.3 关键 API 事实(实测/源码核对)
+
+- 窗口关闭拦截 `window.on_window_should_close(cx, f -> bool)` **存在**,关闭确认
+  已实现(此前 GPUI_NOTES 未确认项落地);
+- `on_mouse_down(MouseButton::Left, |_: &MouseDownEvent, &mut Window, &mut App|)`
+  必须显式按键 + 闭包参数全类型标注(否则 HRTB 推导失败);
+- `FluentBuilder::when/when_some` 仅 `IntoElement` 可用,`.hover(|st|...)` 闭包内
+  不可用(StyleRefinement 非 element),需 if/else;
+- div 无 transform/transition(`.scale()` 不存在);动画降级清单见
+  `docs/KNOWN_DIFFERENCES.md`;
+- `Context::subscribe_in(&entity, window, ...)` 提供 window(Blur/焦点类处理需要);
+  gpui-component `InputState::set_value` 强依赖 `&mut Window`,异步链路须
+  `spawn_in` + `WeakEntity::update_in`;
+- 字体运行时验证:"PingFang SC" / "Menlo" 均在 `all_font_names()` 命中,CJK 正常。
+
+### 7.4 结构
+
+- UI 全部在 bin 目标(`src/main.rs` + `src/app.rs` + `src/ui/**`),lib 保持纯逻辑;
+  新增 `futures = "0.3"`(gpui 依赖树内已有,oneshot/Future 用);
+- `src/service.rs` 仅加 `#[derive(Clone)] DirEntry`(UI 过滤需要,无行为变化);
+- 窗口根 = `gpui_component::Root`(Dialog/Sheet/Notification 层依赖),业务根
+  `AppShell` 挂其下;`gpui_component::init(cx)` → `ui::theme::apply_to_gpui_component(cx)`
+  顺序不可反。

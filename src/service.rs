@@ -138,7 +138,7 @@ pub fn get_task_status(task_id: String) -> Result<task::ProgressEvent, ServiceEr
 
 // ── 目录浏览（原 GET /api/browse，DirPicker 使用）───────────────────────────
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DirEntry {
     pub name: String,
     pub path: String,
