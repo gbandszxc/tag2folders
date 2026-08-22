@@ -376,7 +376,7 @@ impl ConfirmModal {
 
 impl RenderOnce for ConfirmModal {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let (tone_icon, tone_icon_color, pill_bg, pill_border, confirm_variant) =
+        let (tone_icon, tone_icon_color, pill_bg, pill_border, _confirm_variant) =
             tone_config(self.options.tone);
         let loading = self.loading;
         // on_result 需要分发进 4 处闭包(取消按钮/确认按钮/键盘/遮罩),包 Rc 共享
@@ -501,16 +501,32 @@ impl RenderOnce for ConfirmModal {
             )
             .child(
                 div()
+                    .id("confirm-ok-wrap")
                     .w(px(88.0))
+                    .h(px(32.0))
+                    .flex()
                     .flex_none()
-                    .child(
-                        Button::new("confirm-ok")
-                            .label(self.options.confirm_text.clone())
-                            .variant(confirm_variant)
-                            .min_w(px(88.0))
-                            .loading(loading)
-                            .on_click(move |_, w, cx| on_confirm(w, cx)),
-                    ),
+                    .items_center()
+                    .justify_center()
+                    .rounded(theme::RADIUS_MD)
+                    .border_1()
+                    .border_color(theme::AMBER_600)
+                    .bg(theme::AMBER_500)
+                    .text_color(theme::SLATE_800)
+                    .font_weight(gpui::FontWeight(600.0))
+                    .text_size(px(13.0))
+                    .line_height(gpui::relative(1.25))
+                    .when(!loading, |el| {
+                        el.cursor_pointer()
+                            .hover(|st| st.bg(theme::AMBER_600).border_color(theme::AMBER_700))
+                    })
+                    .when(loading, |el| el.opacity(0.55))
+                    .on_click(move |_: &ClickEvent, w: &mut Window, cx: &mut App| {
+                        if !loading {
+                            on_confirm(w, cx);
+                        }
+                    })
+                    .child(self.options.confirm_text.clone()),
             );
         let card = div()
             .id("confirm-card")

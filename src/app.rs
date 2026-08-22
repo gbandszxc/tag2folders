@@ -1174,9 +1174,6 @@ impl AppShell {
                 ConfirmAction::Reset => self.reset(window, cx),
                 ConfirmAction::Exit => {
                     self.exit_confirmed = true;
-                    window.remove_window();
-                    cx.quit();
-                    // 同步退出，避免按下态(active)多渲染一帧被感知为“按钮变大”
                     std::process::exit(0);
                 }
             }
