@@ -295,6 +295,7 @@ pub fn render_dir_picker(
         .relative()
         .flex_1()
         .min_w(px(0.0))
+        .h(px(38.0))
         .child(
             Input::new(&state.input)
                 .h(px(38.0))

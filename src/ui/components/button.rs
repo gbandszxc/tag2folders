@@ -241,6 +241,12 @@ impl RenderOnce for Button {
             None
         };
 
+        let pad_y_to_apply = match (self.pad_y, self.height) {
+            (Some(y), _) => Some(y),
+            (None, Some(_)) => None, // 已指定固定高度，不额外加垂直padding，避免在taffy中被撑大
+            (None, None) => Some(pad_y),
+        };
+
         let mut btn = div()
             .id(self.id)
             .flex()
@@ -249,8 +255,7 @@ impl RenderOnce for Button {
             .gap(if self.loading && has_text { px(4.0) } else { px(6.0) })
             .when_some(self.pad_x, |el, x| el.px(x))
             .when(!self.pad_x.is_some(), |el| el.px(pad_x))
-            .when_some(self.pad_y, |el, y| el.py(y))
-            .when(!self.pad_y.is_some(), |el| el.py(pad_y))
+            .when_some(pad_y_to_apply, |el, y| el.py(y))
             .when_some(self.height, |el, h| el.h(h))
             .when_some(self.min_width, |el, w| el.min_w(w))
             .when_some(self.text_size, |el, s| el.text_size(s))
