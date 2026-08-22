@@ -15,23 +15,27 @@
 //!   常驻 + render 按 current_step 切换"天然满足。
 
 use std::collections::HashSet;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    Context, DefiniteLength, Entity, FocusHandle, HighlightStyle, Pixels, SharedString, StyledText,
-    Subscription, Window, div, px,
+    Animation, AnimationExt, Context, DefiniteLength, Entity, FocusHandle, HighlightStyle, Pixels,
+    ScrollHandle, SharedString, StyledText, Subscription, Window, div, px,
 };
 
 use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Input, InputEvent, InputState};
+use serde::{Deserialize, Serialize};
 use tag2folders_lib::core::preview::PreviewRequest;
 use tag2folders_lib::core::{AudioMetadata, FileMappingItem, MappingStatus, OrganizeMode};
 use tag2folders_lib::service;
+use tag2folders_lib::task::{ProgressEvent, TaskStatus};
 
 use crate::ui::components::{
     AlertBar, AlertVariant, BadgeVariant, Button, ButtonSize, ButtonVariant, CardPadding,
-    ConfirmModal, ConfirmOptions, ConfirmTone, StatusBadge, StatusBadgeSize, StepNav, badge, card,
-    step_nav_aside,
+    ConfirmModal, ConfirmOptions, ConfirmTone, ProgressBar, StatusBadge, StatusBadgeSize, StepNav,
+    badge, card, step_nav_aside,
 };
 use crate::ui::dir_picker::{DirPickerEvent, DirPickerState, render_dir_picker};
 use crate::ui::service::{run_service_in, run_service_result};
@@ -134,6 +138,25 @@ const TREE_ESCAPED_SENTINEL: &str = "__files__\u{0}";
 /// 目录树主体最大/最小高度(SPEC 2.13 maxHeight;PreviewPage 传 420)。
 const TREE_BODY_MAX_H: Pixels = px(420.0);
 const TREE_BODY_MIN_H: Pixels = px(140.0);
+
+// ── 进度页常量(SOURCE_SPEC 4.3)───────────────────────────────────────────
+
+/// 日志缓冲上限(SPEC 4.3.7 LOG_CAP=300,超出丢弃最旧)。
+const LOG_CAP: usize = 300;
+
+/// 日志控制台最大高度(SPEC 4.3.7 maxHeight 260)。
+const LOG_CONSOLE_MAX_H: Pixels = px(260.0);
+
+/// 滚动锚定阈值(SPEC 4.3.7:距底 <40px 视为"停留底部",新日志自动跟随)。
+const LOG_BOTTOM_ANCHOR: Pixels = px(40.0);
+
+/// 任务状态轮询间隔(SPEC 4.3.8 setInterval 1000ms)。
+const POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+/// task_id 持久化文件:数据目录 `<data>/tag2folders/state.json`
+/// (源 localStorage `tag2folders_task_id` 的桌面等价物,仅存 task_id)。
+const STATE_DIR: &str = "tag2folders";
+const STATE_FILE: &str = "state.json";
 
 /// 预览结果区视图切换(SPEC 4.2.4 activeTab)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -304,20 +327,139 @@ fn decode_tree_key(key: &str) -> &str {
     }
 }
 
-/// 步骤 3:执行整理(占位)。页面 agent 参考 SPEC 4.3(轮询/日志/进度)。
+/// 步骤 3:执行整理(SOURCE_SPEC 4.3)。页面为普通 struct(状态挂在
+/// AppShell 上);轮询循环与 task_id 持久化在 AppShell 层——token 必须跨
+/// 页面重建存续(同 scan_token/preview_token,见 progress_token 字段)。
 pub struct ProgressPage {
-    // TODO(页面 agent):progress/started/log/done/errMsg/taskId(持久化)
+    /// 最新任务快照(源 progress:ProgressEvent|null)
+    pub progress: Option<ProgressEvent>,
+    /// 任务已发起(startOrganize 成功或重连)后为 true(源 started;
+    /// 控制"准备开始"卡与进度区/终态横幅的互斥)
+    pub started: bool,
+    /// 实时日志行(SPEC 4.3.7:上限 300,current_file 行与上一行相同不追加)
+    pub log: Vec<String>,
+    /// 日志控制台滚动句柄(滚动锚定:新日志到达且停留在底部附近时自动跟随)
+    pub log_scroll: ScrollHandle,
+    /// 任务已完成(源 done;终态 status=done)
+    pub done: bool,
+    /// 错误消息(源 errMsg;startOrganize 失败或任务 error 终态)
+    pub error: Option<String>,
+    /// "开始执行"防双击(源 startingRef)
+    pub starting: bool,
 }
 
 impl ProgressPage {
     fn new() -> Self {
-        Self {}
+        Self {
+            progress: None,
+            started: false,
+            log: Vec::new(),
+            log_scroll: ScrollHandle::new(),
+            done: false,
+            error: None,
+            starting: false,
+        }
     }
+}
 
-    /// 是否存在进行中/未完成的整理任务(退出确认用,SPEC 1.5)。
-    pub fn has_running_task(&self) -> bool {
-        false // TODO(页面 agent):taskId 非空时 true
+// ── task_id 持久化(源 localStorage `tag2folders_task_id` 的桌面等价物)──
+
+/// state.json 内容(仅存 task_id)。
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedState {
+    task_id: String,
+}
+
+fn state_file_path() -> Option<PathBuf> {
+    dirs::data_dir().map(|base| base.join(STATE_DIR).join(STATE_FILE))
+}
+
+/// 读取持久化的 task_id;任何失败(缺文件/内容损坏/无数据目录)静默返回空串。
+fn load_persisted_task_id() -> String {
+    state_file_path()
+        .map(|path| read_state_file(&path))
+        .unwrap_or_default()
+}
+
+fn read_state_file(path: &std::path::Path) -> String {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<PersistedState>(&text).ok())
+        .map(|s| s.task_id)
+        .unwrap_or_default()
+}
+
+/// 写入 task_id;写盘失败静默忽略(任务仍在内存注册表内,本轮会话可追踪)。
+fn persist_task_id(id: &str) {
+    if let Some(path) = state_file_path() {
+        write_state_file(&path, id);
     }
+}
+
+fn write_state_file(path: &std::path::Path, id: &str) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let state = PersistedState {
+        task_id: id.to_string(),
+    };
+    if let Ok(text) = serde_json::to_string(&state) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
+/// 清除持久化的 task_id(源 setTaskId('') → localStorage.removeItem)。
+fn clear_persisted_task_id() {
+    if let Some(path) = state_file_path() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+// ── 进度页纯逻辑辅助(SOURCE_SPEC 4.3.4 / 4.3.7)─────────────────────────
+
+/// pct = progress && total>0 ? round(current/total*100) : 0(SPEC 4.3.4)。
+fn task_percent(progress: Option<&ProgressEvent>) -> usize {
+    progress
+        .and_then(|p| {
+            (p.total > 0).then(|| ((p.current as f32 / p.total as f32) * 100.0).round() as usize)
+        })
+        .unwrap_or(0)
+}
+
+/// 日志行颜色分级(SPEC 4.3.7 LogLine):源正则 `^(\[[^\]]*\])\s*(.*)$` 的
+/// 等价实现——行首 `[...]`(首个 `]` 即闭括号)为前缀,`\s*` 消耗其后的
+/// 全部空白;返回 (前缀含括号, 余文)。不匹配返回 None(整行 slate-400)。
+fn split_log_line(line: &str) -> Option<(&str, &str)> {
+    if !line.starts_with('[') {
+        return None;
+    }
+    let close = line.find(']')?;
+    let prefix = &line[..=close];
+    let rest = line[close + 1..].trim_start();
+    Some((prefix, rest))
+}
+
+/// 追加 message 日志行(SPEC 4.3.7:该分支无去重,仅上限截断)。
+fn append_log_line(log: &mut Vec<String>, line: String) {
+    log.push(line);
+    if log.len() > LOG_CAP {
+        log.remove(0);
+    }
+}
+
+/// 追加 current_file 日志行(SPEC 4.3.7:与上一行完全相同则不追加)。
+fn append_log_line_dedup(log: &mut Vec<String>, line: String) {
+    if log.last().map(|l| l == &line).unwrap_or(false) {
+        return;
+    }
+    append_log_line(log, line);
+}
+
+/// 日志控制台是否停留在底部附近(距底 ≤40px,SPEC 4.3.7 滚动锚定)。
+/// 依据 gpui ScrollHandle:max_offset.height + offset.y 即距底像素
+/// (内容未溢出时为 0,天然视为"在底部",与源 atBottomRef 初始 true 一致)。
+fn log_is_at_bottom(handle: &ScrollHandle) -> bool {
+    (handle.max_offset().height + handle.offset().y) < LOG_BOTTOM_ANCHOR
 }
 
 // ── 确认弹窗状态 ─────────────────────────────────────────────────────────────
@@ -360,9 +502,9 @@ pub struct AppShell {
     /// App 级整理目标目录(源 targetDir;= resolvedTargetDir || targetDir || sourceDir)
     pub organize_target_dir: String,
     /// 进行中整理任务 id(源 App.tsx taskId / localStorage `tag2folders_task_id`
-    /// 的内存部分;onOrganize 与 reset 置 ''。**TODO(D5 进度页)**:start_organize
-    /// 成功后写入 + 数据目录持久化 + get_task_status 轮询;退出确认的
-    /// has_running_task 应以本字段非空为准)
+    /// 的内存部分;onOrganize 与 reset 置 '')。start_organize 成功后写入 +
+    /// 数据目录持久化;get_task_status 轮询凭它追踪;退出确认的
+    /// has_running_task 以本字段非空且任务未终态为准
     pub task_id: String,
 
     pub scan: ScanPage,
@@ -377,6 +519,11 @@ pub struct AppShell {
     /// 预览请求竞态 token(SPEC 4.2.3 abortRef):表单变更/新预览/reset 时 +1,
     /// 回调比对后丢弃过期响应。与 scan_token 同理放 AppShell 跨页面重建。
     preview_token: u64,
+
+    /// 任务发起/轮询竞态 token(SPEC 4.3.8 竞态防护):reset、新任务发起、
+    /// 重连时 +1。start_organize 回调比对后丢弃过期响应;轮询循环比对后自杀。
+    /// 与 scan_token 同理放 AppShell 跨页面重建。
+    progress_token: u64,
 
     /// 待挂载的确认弹窗(单例:重置/退出)
     confirm: Option<PendingConfirm>,
@@ -409,11 +556,27 @@ impl AppShell {
             exit_confirmed: false,
             scan_token: 0,
             preview_token: 0,
+            progress_token: 0,
             _subs: Vec::new(),
         };
 
         // 扫描页/预览页事件回路(见 wire_page_subscriptions)
         shell.wire_page_subscriptions(window, cx);
+
+        // 任务重连(SPEC 7.7 刷新重连语义的桌面等价):读取持久化 task_id,
+        // 任务仍在注册表内(终态未超 300s 被淘汰)→ 恢复轮询追踪(页面状态
+        // 保持步骤 1,与源刷新后 currentStep=1、mappings 丢失一致);
+        // 已过期/不存在 → 静默清空(含持久化文件),停留步骤 1。
+        shell.task_id = load_persisted_task_id();
+        if !shell.task_id.is_empty() {
+            if service::get_task_status(shell.task_id.clone()).is_ok() {
+                shell.progress.started = true;
+                shell.start_progress_polling(cx);
+            } else {
+                shell.task_id.clear();
+                clear_persisted_task_id();
+            }
+        }
 
         shell
     }
@@ -606,18 +769,23 @@ impl AppShell {
     }
 
     /// 全量重置(SPEC 1.4 确认后 / SPEC 4.3.5 "完成并开启新任务"直接调用)。
-    /// 语义:回步骤 1、max_unlocked=1、清空页面数据(重建页面结构体)、清 taskId。
+    /// 语义:回步骤 1、max_unlocked=1、清空页面数据(重建页面结构体)、清
+    /// taskId(内存 + 数据目录持久化文件)并停止任务轮询。
     pub fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.current_step = 1;
         self.max_unlocked_step = 1;
         self.reset_key += 1;
-        // 丢弃"重置前发起"的在途扫描/预览(等价源卸载时 tokenRef += 1)
+        // 丢弃"重置前发起"的在途扫描/预览/整理发起,并停掉运行中的轮询循环
+        // (源:页面卸载 stopPolling + token 自增丢在途响应)
         self.scan_token += 1;
         self.preview_token += 1;
+        self.progress_token += 1;
         self.scanned_files.clear();
         self.source_dir.clear();
         self.clear_organize_batch();
-        self.task_id.clear(); // TODO(D5):同步清数据目录持久化的 task_id
+        self.task_id.clear();
+        // 源 handleReset → setTaskId('') → localStorage.removeItem
+        clear_persisted_task_id();
         // 重建页面 = 源 resetKey 强制重挂载(内部状态与订阅全部丢弃重建)
         self.scan = ScanPage::new(window, cx);
         self.preview = PreviewPage::new(window, cx);
@@ -791,7 +959,11 @@ impl AppShell {
         self.organize_mappings = organizable;
         self.organize_mode = self.preview.mode;
         self.organize_target_dir = target_dir;
-        self.task_id.clear(); // 源 onOrganize 内 setTaskId('')
+        // 源 onOrganize 内 setTaskId('')(含 localStorage.removeItem)。
+        // 旧任务的轮询循环(若有)继续追踪旧 task_id,与源 setInterval
+        // 捕获 id 的行为一致(见 start_progress_polling 注释)。
+        self.task_id.clear();
+        clear_persisted_task_id();
         // onNext = setMaxUnlockedStep(3) + setCurrentStep(3)
         self.max_unlocked_step = 3;
         self.current_step = 3;
@@ -802,6 +974,149 @@ impl AppShell {
     fn go_back_to_scan(&mut self, cx: &mut Context<Self>) {
         self.current_step = 1;
         cx.notify();
+    }
+
+    // ── 进度页逻辑(SOURCE_SPEC 4.3.3 handleStart / 4.3.8 轮询 / 7.7 重连)──
+
+    /// "开始执行"(SPEC 4.3.3 handleStart):starting 防双击;置 started、清
+    /// done/error/log/progress → `start_organize(mappings, mode, target_dir)`
+    /// (后台线程)→ 成功:写 task_id 并持久化(先持久化再更新界面,POST 在途
+    /// 时用户切走任务也保持可重连)、启动轮询;失败:started 回 false(按钮
+    /// 重现,可重试同批次)、错误进"准备开始"卡。
+    fn handle_progress_start(&mut self, cx: &mut Context<Self>) {
+        if self.progress.starting {
+            return; // 源 startingRef:双击在首次置位生效前直达这里的防护
+        }
+        self.progress.starting = true;
+        self.progress.started = true;
+        self.progress.done = false;
+        self.progress.error = None;
+        self.progress.log.clear();
+        self.progress.progress = None;
+        self.progress_token += 1; // 使旧轮询循环失效(源 startPolling 先 stopPolling)
+        let token = self.progress_token;
+        cx.notify();
+
+        let mappings = self.organize_mappings.clone();
+        let mode = self.organize_mode;
+        let target_dir = self.organize_target_dir.clone();
+        run_service_result(
+            cx,
+            move || service::start_organize(mappings, mode, target_dir),
+            move |this, result, cx| {
+                // 重置/新发起后到达的过期响应 → 丢弃
+                if this.progress_token != token {
+                    return;
+                }
+                this.progress.starting = false;
+                match result {
+                    Ok(resp) => {
+                        this.task_id = resp.task_id.clone();
+                        persist_task_id(&resp.task_id);
+                        this.start_progress_polling(cx);
+                    }
+                    Err(msg) => {
+                        this.progress.started = false;
+                        this.progress.error = Some(msg);
+                    }
+                }
+                cx.notify();
+            },
+        );
+    }
+
+    /// 启动任务状态轮询(SPEC 4.3.8 startPolling):每 1000ms 调一次
+    /// `get_task_status(task_id)`(id 在启动时捕获,与源 setInterval 闭包一致
+    /// ——onOrganize 清空 task_id 不影响已运行循环对旧任务的追踪);快照落地
+    /// 见 [`Self::apply_task_snapshot`];done/error 终态停止;查询失败静默
+    /// 重试不中断(源 catch 语义)。token 防串:reset/新发起使本循环自杀。
+    /// get_task_status 为内存注册表读取(锁 + 小结构克隆,微秒级),直接在
+    /// 主线程 async 上下文执行(见 UI_INTEGRATION §3)。
+    fn start_progress_polling(&mut self, cx: &mut Context<Self>) {
+        let task_id = self.task_id.clone();
+        if task_id.is_empty() {
+            return;
+        }
+        self.progress_token += 1;
+        let token = self.progress_token;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(POLL_INTERVAL).await;
+                let result = service::get_task_status(task_id.clone());
+                let keep_going = this.update(cx, |this, cx| {
+                    if this.progress_token != token {
+                        return false; // 已重置/被新循环取代 → 自杀
+                    }
+                    let terminal = this.apply_task_snapshot(result);
+                    cx.notify();
+                    !terminal
+                });
+                match keep_going {
+                    Ok(true) => {}
+                    _ => return, // 终态、实体已释放或 token 失效
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// 单次快照落地(SPEC 4.3.8 轮询体逐条):更新 progress;追加日志行
+    /// (current_file 非空 → `[current/total] basename` 连续相同不重复,
+    /// 否则 message 非空 → 追加 message;滚动锚定);status=done → done=true,
+    /// status=error → errMsg = message || `执行出错`,两者均返回 true(停轮询)。
+    fn apply_task_snapshot(&mut self, data: Result<ProgressEvent, service::ServiceError>) -> bool {
+        let Ok(data) = data else {
+            // 任务不存在/查询失败:静默重试,不中断轮询(SPEC 4.3.8)
+            return false;
+        };
+        // 滚动锚定:以追加前的滚动位置判断用户是否停留在底部附近
+        let at_bottom = log_is_at_bottom(&self.progress.log_scroll);
+        if !data.current_file.is_empty() {
+            let line = format!(
+                "[{}/{}] {}",
+                data.current,
+                data.total,
+                basename(&data.current_file)
+            );
+            append_log_line_dedup(&mut self.progress.log, line);
+        } else if !data.message.is_empty() {
+            append_log_line(&mut self.progress.log, data.message.clone());
+        }
+        if at_bottom {
+            // 新日志到达且用户位于底部附近 → 自动滚到底;上翻阅读不打扰
+            self.progress.log_scroll.scroll_to_bottom();
+        }
+        self.progress.progress = Some(data.clone());
+        match data.status {
+            TaskStatus::Done => {
+                self.progress.done = true;
+                true
+            }
+            TaskStatus::Error => {
+                self.progress.error = Some(if data.message.is_empty() {
+                    "执行出错".to_string()
+                } else {
+                    data.message.clone()
+                });
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// 是否有进行中/未完成的整理任务(SPEC 1.5 退出确认两变体)。
+    /// 判定:task_id 非空 且 快照未到终态(done/error);尚无快照(刚发起/
+    /// 恢复后未轮到)视为进行中。与源 `Boolean(taskId)` 的差异:源任务终态
+    /// 后不清 taskId(直到用户点"完成并开启新任务"),退出确认会误报"有任务";
+    /// GPUI 版按快照状态判定(见 docs/KNOWN_DIFFERENCES.md)。
+    fn has_running_task(&self) -> bool {
+        if self.task_id.is_empty() {
+            return false;
+        }
+        !matches!(
+            self.progress.progress.as_ref().map(|p| p.status),
+            Some(TaskStatus::Done) | Some(TaskStatus::Error)
+        )
     }
 
     // ── 确认弹窗 ─────────────────────────────────────────────────────────────
@@ -822,7 +1137,7 @@ impl AppShell {
     }
 
     fn open_exit_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (description, tip) = if self.progress.has_running_task() {
+        let (description, tip) = if self.has_running_task() {
             (
                 Some("当前有正在进行或未完成的文件整理任务,退出将中断处理。"),
                 Some("建议等待任务整理完成后再退出应用。"),
@@ -951,22 +1266,457 @@ impl AppShell {
             )
     }
 
-    /// 当前页渲染。步骤 1/2 已实现;步骤 3 仍为占位(进度页 agent 替换)。
+    /// 当前页渲染(步骤 1/2/3)。
     fn render_page(&self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         match self.current_step {
             1 => self.render_scan_page(window, cx).into_any_element(),
             2 => self.render_preview_page(window, cx).into_any_element(),
-            _ => card()
-                .title("任务概览")
-                .subtitle("整理任务的模式、目标与待处理数量")
+            _ => self.render_progress_page(window, cx).into_any_element(),
+        }
+    }
+
+    // ── 进度页渲染(SOURCE_SPEC 4.3.1 ~ 4.3.7)────────────────────────────
+
+    /// 步骤 3 完整页面:无任务数据警告 → 任务概览卡 →(未发起)准备开始卡 /
+    /// (进行中)执行进度卡 / 终态横幅(完成/失败)→ 实时日志控制台。
+    fn render_progress_page(
+        &self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let mappings = &self.organize_mappings;
+        let no_mappings = mappings.is_empty();
+        let started = self.progress.started;
+        let done = self.progress.done;
+        let mode = self.organize_mode;
+        let target_dir = self.organize_target_dir.clone();
+
+        // 4.3.1 无任务数据警告(noMappings;整页唯一内容,无按钮)
+        if no_mappings {
+            return div()
+                .flex()
+                .items_start()
+                .gap(px(10.0))
+                .px(px(16.0))
+                .py(px(12.0))
+                .bg(theme::AMBER_50)
+                .border_1()
+                .border_color(theme::AMBER_200)
+                .rounded(theme::RADIUS_LG)
+                .child(
+                    div().flex_none().mt(px(1.0)).child(
+                        icon_sized(Icon::AlertCircle, px(16.0)).text_color(theme::AMBER_600),
+                    ),
+                )
                 .child(
                     div()
                         .text_size(px(13.0))
-                        .text_color(theme::SLATE_500)
-                        .child("进度页占位 —— 由页面 agent 实现(SPEC 4.3)"),
+                        .text_color(theme::AMBER_800)
+                        .child("没有待处理的文件，请先完成扫描和预览步骤。"),
                 )
-                .into_any_element(),
+                .into_any_element();
         }
+
+        // ── 事件处理器 ──
+        let on_start = cx.listener(
+            |this, _e: &gpui::ClickEvent, _window, cx| this.handle_progress_start(cx),
+        );
+
+        // ── 4.3.2 任务概览卡片 ──
+        let mode_badge_text = match mode {
+            OrganizeMode::Move => "移动（删除源文件）",
+            OrganizeMode::Copy => "复制（保留源文件）",
+        };
+        let overview = card()
+            .title("任务概览")
+            .subtitle("整理任务的模式、目标与待处理数量")
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    // 源 gap '14px 32px'(行 14 / 列 32);gpui 无法分离 → 取 32
+                    .gap(px(32.0))
+                    .child(
+                        div()
+                            .child(overview_label("操作模式"))
+                            .child(
+                                badge(BadgeVariant::Amber)
+                                    .px(px(10.0))
+                                    .py(px(4.0))
+                                    .text_size(px(12.0))
+                                    .child(mode_badge_text),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .flex_grow()
+                            .flex_shrink()
+                            .flex_basis(px(220.0))
+                            .child(overview_label("目标目录"))
+                            .child(
+                                // 等宽 chip:slate-100 底、padding 4 10、圆角 6、
+                                // 12.5 slate-700、truncate(title 悬浮提示为已知差异)
+                                div()
+                                    .font_family(theme::FONT_MONO)
+                                    .text_size(px(12.5))
+                                    .text_color(theme::SLATE_700)
+                                    .bg(theme::SLATE_100)
+                                    .px(px(10.0))
+                                    .py(px(4.0))
+                                    .rounded(theme::RADIUS_SM)
+                                    .max_w(gpui::relative(1.0))
+                                    .truncate()
+                                    .child(if target_dir.is_empty() {
+                                        "（未设置）".to_string()
+                                    } else {
+                                        target_dir.clone()
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .child(overview_label("待处理总数"))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_baseline()
+                                    .gap(px(4.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(18.0))
+                                            .font_weight(gpui::FontWeight(700.0))
+                                            .text_color(theme::AMBER_800)
+                                            .child(mappings.len().to_string()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(12.0))
+                                            .font_weight(gpui::FontWeight(500.0))
+                                            .text_color(theme::SLATE_500)
+                                            .child("个文件"),
+                                    ),
+                            ),
+                    ),
+            );
+
+        let mut page = div().flex().flex_col().w_full().child(overview);
+
+        // ── 4.3.3 准备开始卡片(!started)──
+        if !started {
+            let (mode_word, suffix) = match mode {
+                OrganizeMode::Move => ("移动", "，完成后源文件将被删除。"),
+                OrganizeMode::Copy => ("复制", "，源文件将保留。"),
+            };
+            let head = format!("将{mode_word} ");
+            let count = mappings.len().to_string();
+            let text = format!("{head}{count} 个文件到目标目录{suffix}");
+            // 加粗计数(源 <strong color amber-800>)按字节区间高亮
+            let range = head.len()..head.len() + count.len();
+            let mut prep = card()
+                .map(|el| el.mt(px(16.0)))
+                .title("准备开始")
+                .subtitle("确认无误后开始执行整理任务")
+                .child(
+                    div()
+                        .mb(px(16.0))
+                        .text_size(px(13.5))
+                        .text_color(theme::SLATE_600)
+                        .child(
+                            StyledText::new(text).with_highlights(vec![(
+                                range,
+                                HighlightStyle {
+                                    font_weight: Some(gpui::FontWeight(700.0)),
+                                    color: Some(theme::AMBER_800.into()),
+                                    ..Default::default()
+                                },
+                            )]),
+                        ),
+                );
+            // errMsg 提示(rose;startOrganize 失败后的重试场景)
+            if let Some(err) = self.progress.error.clone() {
+                prep = prep.child(
+                    AlertBar::new(AlertVariant::Rose, err)
+                        .icon(Icon::AlertCircle)
+                        .mb(px(16.0)),
+                );
+            }
+            prep = prep.child(
+                Button::new("progress-start")
+                    .label("开始执行")
+                    .variant(ButtonVariant::Primary)
+                    .size(ButtonSize::Lg)
+                    .icon(Icon::Play, px(15.0))
+                    .on_click(on_start),
+            );
+            page = page.child(prep);
+        }
+
+        // ── 4.3.4 执行进度卡片(started && !done && 无错误)──
+        if started && !done && self.progress.error.is_none() {
+            let pct = task_percent(self.progress.progress.as_ref());
+            let current_file = self
+                .progress
+                .progress
+                .as_ref()
+                .map(|p| p.current_file.clone())
+                .unwrap_or_default();
+            let (cur, total) = self
+                .progress
+                .progress
+                .as_ref()
+                .map(|p| (p.current, p.total))
+                .unwrap_or((0, 0));
+
+            let mut running = card()
+                .map(|el| el.mt(px(16.0)))
+                .title("执行进度")
+                .subtitle("任务进行中，请勿关闭窗口")
+                // 头行:百分比大字 + 已处理计数(底对齐、两端)
+                .child(
+                    div()
+                        .mb(px(10.0))
+                        .flex()
+                        .items_end()
+                        .justify_between()
+                        .gap(px(12.0))
+                        .child(
+                            div()
+                                .text_size(px(32.0))
+                                .font_weight(gpui::FontWeight(700.0))
+                                .text_color(theme::AMBER_800)
+                                .line_height(gpui::relative(1.0))
+                                .child(format!("{pct}%")),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(13.0))
+                                .text_color(theme::SLATE_600)
+                                .child(if self.progress.progress.is_some() {
+                                    format!("{cur} / {total} 已处理")
+                                } else {
+                                    "等待任务开始…".to_string()
+                                }),
+                        ),
+                )
+                .child(ProgressBar::new(cur, total));
+
+            // 当前文件条(current_file 非空时):脉冲圆点 + 正在处理 + 文件名
+            if !current_file.is_empty() {
+                running = running.child(
+                    div()
+                        .mt(px(12.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .px(px(12.0))
+                        .py(px(7.0))
+                        .bg(theme::AMBER_50)
+                        .border_1()
+                        .border_color(theme::AMBER_200)
+                        .rounded(theme::RADIUS_MD)
+                        .child(
+                            // 脉冲圆点 7×7 amber-500(animate-pulse:1↔0.6,2s)
+                            div()
+                                .size(px(7.0))
+                                .flex_none()
+                                .rounded(theme::RADIUS_FULL)
+                                .bg(theme::AMBER_500)
+                                .with_animation(
+                                    SharedString::from("progress-current-pulse"),
+                                    Animation::new(Duration::from_millis(
+                                        theme::DURATION_PULSE_MS,
+                                    ))
+                                    .repeat()
+                                    .with_easing(|t| 1.0 - (2.0 * t - 1.0).abs()),
+                                    |el, eased| el.opacity(0.6 + 0.4 * eased),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_size(px(11.5))
+                                .font_weight(gpui::FontWeight(600.0))
+                                .text_color(theme::AMBER_800)
+                                .child("正在处理"),
+                        )
+                        .child(
+                            icon_sized(Icon::FileAudio, px(14.0)).text_color(theme::AMBER_600),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .font_family(theme::FONT_MONO)
+                                .text_size(px(12.0))
+                                .text_color(theme::AMBER_900)
+                                .truncate()
+                                .child(current_file),
+                        ),
+                );
+            }
+            page = page.child(running);
+        }
+
+        // ── 4.3.5 完成横幅(started && done)──
+        if started && done {
+            let total = self
+                .progress
+                .progress
+                .as_ref()
+                .map(|p| p.total)
+                .unwrap_or(mappings.len());
+            let on_finish = cx.listener(
+                |this, _e: &gpui::ClickEvent, window, cx| {
+                    // onFinish = handleReset(false):不弹确认,直接全量重置
+                    this.reset(window, cx);
+                },
+            );
+            page = page.child(
+                div()
+                    .mt(px(16.0))
+                    .flex()
+                    .items_start()
+                    .gap(px(14.0))
+                    .px(px(22.0))
+                    .py(px(20.0))
+                    .bg(theme::EMERALD_50)
+                    .border_1()
+                    .border_color(theme::EMERALD_200)
+                    .rounded(theme::RADIUS_LG)
+                    .child(
+                        div().flex_none().mt(px(2.0)).child(
+                            icon_sized(Icon::CheckCircle, px(24.0))
+                                .text_color(theme::EMERALD_600),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(
+                                div()
+                                    .text_size(px(16.0))
+                                    .font_weight(gpui::FontWeight(700.0))
+                                    .text_color(theme::EMERALD_700)
+                                    .child("整理完成"),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(4.0))
+                                    .text_size(px(12.5))
+                                    .text_color(theme::EMERALD_700)
+                                    .opacity(0.85)
+                                    .child(format!(
+                                        "共处理 {total} 个文件，任务已成功结束。"
+                                    )),
+                            )
+                            .child(
+                                div().mt(px(14.0)).child(
+                                    Button::new("progress-finish-done")
+                                        .label("完成并开启新任务")
+                                        .variant(ButtonVariant::Primary)
+                                        .icon(Icon::Sparkles, px(15.0))
+                                        .on_click(on_finish),
+                                ),
+                            ),
+                    ),
+            );
+        }
+
+        // ── 4.3.6 失败横幅(started && errMsg && !done)──
+        if started && !done {
+            if let Some(err) = self.progress.error.clone() {
+                let on_finish = cx.listener(
+                    |this, _e: &gpui::ClickEvent, window, cx| {
+                        this.reset(window, cx);
+                    },
+                );
+                page = page.child(
+                    div()
+                        .mt(px(16.0))
+                        .flex()
+                        .items_start()
+                        .gap(px(14.0))
+                        .px(px(22.0))
+                        .py(px(20.0))
+                        .bg(theme::ROSE_50)
+                        .border_1()
+                        .border_color(theme::ROSE_200)
+                        .rounded(theme::RADIUS_LG)
+                        .child(
+                            div().flex_none().mt(px(2.0)).child(
+                                icon_sized(Icon::AlertCircle, px(24.0))
+                                    .text_color(theme::ROSE_600),
+                            ),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .child(
+                                    div()
+                                        .text_size(px(16.0))
+                                        .font_weight(gpui::FontWeight(700.0))
+                                        .text_color(theme::ROSE_700)
+                                        .child("任务执行失败"),
+                                )
+                                .child(
+                                    // rose-800 未定义陷阱 → #0f172a(SPEC 7.9);
+                                    // pre-wrap:多行错误(如 preflight_errors)换行展示
+                                    div()
+                                        .mt(px(4.0))
+                                        .text_size(px(12.5))
+                                        .text_color(theme::INHERITED_TEXT)
+                                        .child(err),
+                                )
+                                .child(
+                                    div().mt(px(14.0)).child(
+                                        Button::new("progress-finish-fail")
+                                            .label("完成并开启新任务")
+                                            .variant(ButtonVariant::Primary)
+                                            .icon(Icon::Sparkles, px(15.0))
+                                            .on_click(on_finish),
+                                    ),
+                                ),
+                        ),
+                );
+            }
+        }
+
+        // ── 4.3.7 实时日志控制台(started && log 非空)──
+        if started && !self.progress.log.is_empty() {
+            let mut console = div()
+                .id("progress-log")
+                .track_scroll(&self.progress.log_scroll)
+                .max_h(LOG_CONSOLE_MAX_H)
+                .overflow_y_scroll()
+                .bg(theme::SLATE_950) // #020617
+                .rounded(theme::RADIUS_MD)
+                .px(px(14.0))
+                .py(px(12.0))
+                .font_family(theme::FONT_MONO)
+                .text_size(px(12.0))
+                .line_height(gpui::relative(1.8))
+                .text_color(theme::SLATE_300);
+            for (ix, line) in self.progress.log.iter().enumerate() {
+                console = console.child(render_log_line(ix, line));
+            }
+            page = page.child(
+                card()
+                    .map(|el| el.mt(px(16.0)))
+                    .title("实时日志")
+                    .actions(
+                        badge(BadgeVariant::Slate)
+                            .text_size(px(10.5))
+                            .child("TERMINAL"),
+                    )
+                    .child(console),
+            );
+        }
+
+        page.into_any_element()
     }
 
     // ── 扫描页渲染(SOURCE_SPEC 4.1.1 ~ 4.1.7)──────────────────────────────
@@ -2140,6 +2890,30 @@ fn field_label(text: &str) -> gpui::Div {
         .child(text.to_string())
 }
 
+// ── 进度页渲染辅助(SOURCE_SPEC 4.3.2 / 4.3.7)────────────────────────────────
+
+/// 概览卡字段小标签(SPEC 4.3.2):fontSize 11.5、slate-500、marginBottom 4。
+fn overview_label(text: &str) -> gpui::Div {
+    div()
+        .text_size(px(11.5))
+        .text_color(theme::SLATE_500)
+        .mb(px(4.0))
+        .child(text.to_string())
+}
+
+/// 日志行(SPEC 4.3.7 LogLine):`[n/total]` 前缀琥珀 amber-400 #ffc533、
+/// 正文天蓝 sky-300 #bae6fd;不匹配整行 slate-400。
+fn render_log_line(ix: usize, line: &str) -> gpui::Stateful<gpui::Div> {
+    let row = div().id(SharedString::from(format!("log-line-{ix}")));
+    match split_log_line(line) {
+        Some((prefix, rest)) => row
+            .flex()
+            .child(div().text_color(theme::AMBER_400).child(prefix.to_string()))
+            .child(div().text_color(theme::SKY_300).child(rest.to_string())),
+        None => row.text_color(theme::SLATE_400).child(line.to_string()),
+    }
+}
+
 /// 分段控件按钮(SPEC 2.10 Tabs;4.2.2 操作模式 toggle 同款分段样式):
 /// 激活 = weight 600 + amber-800 + 白底 + 圆角 6 + shadow-xs;
 /// 未激活 = weight 500 + slate-600 + 透明底。可选计数徽章(list Tab)。
@@ -2559,6 +3333,87 @@ mod tests {
         assert_eq!(decode_tree_key("__files__\u{0}"), "__files__");
         assert_eq!(decode_tree_key("Artist"), "Artist");
         assert_eq!(decode_tree_key("__files__"), "__files__");
+    }
+
+    // ── 进度页(SPEC 4.3)──────────────────────────────────────────────────
+
+    /// 日志行颜色分级(SPEC 4.3.7):`[...]` 前缀 + 正文;`\s*` 消耗全部空白;
+    /// 不匹配(无 `[` 开头/无闭括号)→ None;空括号 `[]` 是合法前缀
+    #[test]
+    fn log_line_splits_bracket_prefix() {
+        assert_eq!(split_log_line("[2/5] a.mp3"), Some(("[2/5]", "a.mp3")));
+        assert_eq!(split_log_line("[2/5]   a.mp3"), Some(("[2/5]", "a.mp3")));
+        assert_eq!(split_log_line("Processed 1/3"), None);
+        assert_eq!(split_log_line("[unclosed"), None);
+        assert_eq!(split_log_line("[]"), Some(("[]", "")));
+        assert_eq!(split_log_line(""), None);
+    }
+
+    /// 日志去重与上限(SPEC 4.3.7 / 7.8):current_file 行仅连续相同去重,
+    /// message 行无去重;缓冲上限 300 丢弃最旧
+    #[test]
+    fn log_dedup_and_cap() {
+        let mut log = Vec::new();
+        for _ in 0..5 {
+            append_log_line_dedup(&mut log, "[1/2] a.mp3".to_string());
+        }
+        assert_eq!(log, vec!["[1/2] a.mp3"]);
+        append_log_line_dedup(&mut log, "[2/2] b.mp3".to_string());
+        // 非连续重复必须保留(仅比对最后一行)
+        append_log_line_dedup(&mut log, "[1/2] a.mp3".to_string());
+        assert_eq!(log.len(), 3);
+
+        // message 分支无去重(源:无条件追加)
+        let mut m = Vec::new();
+        append_log_line(&mut m, "Completed 2 file(s).".to_string());
+        append_log_line(&mut m, "Completed 2 file(s).".to_string());
+        assert_eq!(m.len(), 2);
+
+        // 上限 300,丢弃最旧
+        let mut big = Vec::new();
+        for i in 0..(LOG_CAP + 10) {
+            append_log_line(&mut big, format!("line {i}"));
+        }
+        assert_eq!(big.len(), LOG_CAP);
+        assert_eq!(big.first().unwrap(), "line 10");
+        assert_eq!(big.last().unwrap(), &format!("line {}", LOG_CAP + 9));
+    }
+
+    /// pct = round(current/total*100);无快照或 total=0 → 0(SPEC 4.3.4)
+    #[test]
+    fn task_percent_rounds_and_defaults_zero() {
+        let ev = |cur: usize, total: usize| ProgressEvent {
+            task_id: "t".into(),
+            status: TaskStatus::Running,
+            current: cur,
+            total,
+            current_file: String::new(),
+            message: String::new(),
+        };
+        assert_eq!(task_percent(None), 0);
+        assert_eq!(task_percent(Some(&ev(0, 3))), 0);
+        assert_eq!(task_percent(Some(&ev(1, 3))), 33); // 33.33 → 33
+        assert_eq!(task_percent(Some(&ev(2, 3))), 67); // 66.67 → 67
+        assert_eq!(task_percent(Some(&ev(3, 3))), 100);
+        assert_eq!(task_percent(Some(&ev(5, 0))), 0);
+    }
+
+    /// task_id 持久化往返 + 静默失败语义(缺文件/损坏内容 → 空串)
+    #[test]
+    fn task_id_state_file_round_trip() {
+        let dir = std::env::temp_dir().join(format!("t2f-state-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join(STATE_FILE);
+
+        assert_eq!(read_state_file(&path), ""); // 缺文件
+        write_state_file(&path, "abc-def");
+        assert_eq!(read_state_file(&path), "abc-def");
+        write_state_file(&path, "");
+        assert_eq!(read_state_file(&path), "");
+        // 损坏内容 → 静默空串
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(read_state_file(&path), "");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

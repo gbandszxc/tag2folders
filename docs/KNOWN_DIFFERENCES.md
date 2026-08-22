@@ -7,8 +7,8 @@
 
 gpui 0.2.2 提供 `window.on_window_should_close(cx, f)`(返回 false 可阻止关闭),
 因此 SPEC 1.5 的关闭确认弹窗**已等价实现**(`src/app.rs register_close_guard`),
-不列入差异。两变体文案(有任务/无任务)已就绪,`has_running_task` 待进度页
-agent 接入真实 taskId。
+不列入差异。两变体文案(有任务/无任务)已接入真实判定(`AppShell::has_running_task`:
+task_id 非空且任务快照未到终态;与源 `Boolean(taskId)` 的差异见 §6)。
 
 ## 2. 布局/度量近似
 
@@ -22,6 +22,9 @@ agent 接入真实 taskId。
 | 预览页映射表滚动模型 | 同上(sticky 表头) | 同扫描页方案(固定表头 + 表体容器内滚动 max-height 480px) | 同上 |
 | 扫描页/预览页底部导航条 | `position: sticky; bottom: 0`(贴视口底) | 常规流元素(位于页面末尾) | 同上无 sticky;滚动到底部时视觉一致,滚动中途不悬浮 |
 | 预览页统计卡网格 | `grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))` | flex wrap + 每卡 `flex:1; min-width:150` | gpui 无 auto-fit 网格;1080 宽度下 6 卡同样单行等分,窄窗时逐行换行 |
+| 进度页任务概览卡 gap | `14px 32px`(行距 14 / 列距 32 分离) | 统一 `32px` | gpui 0.2.2 无 gap_x/gap_y 分离设置;单行布局(常态)无差异,换行时行距偏大 |
+| 进度页百分比大字 letterSpacing | `-0.02em` | 未设置 | gpui 0.2.2 无 letter_spacing 样式;32px 大字下视觉差异不可辨 |
+| tabular-nums(等宽数字) | 概览计数/百分比/已处理计数等 `fontVariantNumeric: tabular-nums` | 未复刻 | gpui 无 font-variant API;数字跳动时宽度有轻微抖动 |
 
 ## 3. 动画降级
 
@@ -51,11 +54,22 @@ agent 接入真实 taskId。
 | 占位符芯片 hover | 源芯片自带 hovered 态(图标/文字随悬浮换色);GPUI 版用 `on_hover` 把 hover 状态上提到页面重渲染实现,**颜色/边框逐项一致**;仅 150ms 过渡缺失(见 §3) |
 | 目录树节点顺序 | 源 JS 对象按 Python dict 插入序遍历;GPUI 版 `serde_json` 默认 BTreeMap,**同层目录/文件按字典序**排列 |
 | 目录树全部展开/折叠 | 源靠 `key={expandAll}` 变更强制重挂载整棵树重置开合;GPUI 版清空用户开合记录 + 重算默认开合(depth<2),行为等价 |
+| 日志滚动锚定实现 | 源 `onScroll` 事件持续维护 `atBottomRef`(scrollHeight-scrollTop-clientHeight < 40),新日志到达时查 ref;GPUI 版在新日志**追加时**直接读 `ScrollHandle` 实时位置(`max_offset.height + offset.y < 40px`)判定,判定后用 gpui 一次性 `scroll_to_bottom()` 标记跟随 | 语义等价(距底 40px 阈值一致、上翻不打扰),实现路径不同;实时读取比事件维护的 ref 更不会漏掉滚动状态 |
+| 日志行内联排版 | 源 LogLine 两个 `<span>`(inline)前缀+正文同行流式排列 | GPUI 版 flex 行内两个子 div | 等宽字体下视觉一致;长正文在自身子元素内换行 |
 
 ## 5. 其他
 
-- 源 `localStorage` 持久化(`tag2folders_task_id`)→ GPUI 版计划用 `dirs` 数据目录
-  文件,由进度页 agent 实现(PORT_NOTES §6 遗留项);
+- 源 `localStorage` 持久化(`tag2folders_task_id`)→ GPUI 版已实现为 `dirs` 数据目录
+  `tag2folders/state.json`(仅存 task_id,读写失败静默忽略);启动时读取并在任务
+  仍存活时恢复轮询追踪(PORT_NOTES §6 遗留项已闭环);
 - 源 `exit_app` 兜底销毁窗口 → GPUI 版统一 `cx.quit()`;
 - 字体栈:源为多级回退链,GPUI 版 UI 文本直接 "PingFang SC"、等宽 "Menlo"
   (macOS;已在运行时验证两者可解析,中文无豆腐块)。
+
+## 6. 进度页任务生命周期决策(有意的行为修正)
+
+| 项 | 源行为 | GPUI 行为 | 说明 |
+|---|---|---|---|
+| 退出确认"有任务"判定 | `Boolean(taskId)`:任务已 done/error 但未点"完成并开启新任务"时,关窗确认仍报"有任务" | task_id 非空**且**快照未到终态(done/error);尚无快照视为进行中 | 终态任务退出不会中断任何处理,报"有任务"是源的误报;按 D5 任务说明修正 |
+| 启动恢复时任务已过期(终态超 300s 被淘汰) | 刷新后凭 localStorage taskId 无限静默轮询(永不停止,SPEC 7.7 注明"现状行为") | 启动时一次性探测 `get_task_status`,不存在则静默清空 taskId(含持久化文件)并停留步骤 1 | 避免无意义的永久轮询;按 D5 任务说明决策 |
+| 运行中轮询遇"Task not found" | 继续静默轮询 | 同源:继续静默轮询(不停轮询) | 保持 SPEC 4.3.8 语义;该场景仅在注册表 32 容量挤占等极端情况下出现 |
