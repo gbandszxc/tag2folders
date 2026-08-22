@@ -299,6 +299,7 @@ pub fn render_dir_picker(
         .child(
             Input::new(&state.input)
                 .h(px(38.0))
+                .py(px(0.0))
                 .pl(px(34.0))
                 .pr(if has_value && !disabled { px(32.0) } else { px(12.0) })
                 .text_size(px(13.0))
@@ -431,6 +432,7 @@ fn render_browse_modal(
                 .child(
                     Input::new(&state.path_input)
                         .h(px(32.0))
+                        .py(px(0.0))
                         .text_size(px(12.5))
                         .font_family(theme::FONT_MONO),
                 ),
@@ -441,18 +443,22 @@ fn render_browse_modal(
         .relative()
         .mt(px(10.0))
         .child(
-            div()
-                .absolute()
-                .left(px(8.0))
-                .top(px(8.0))
-                .child(icon_sized(Icon::Search, px(13.0)).text_color(theme::SLATE_400)),
-        )
-        .child(
             Input::new(&state.filter_input)
                 .h(px(30.0))
+                .py(px(0.0))
                 .text_size(px(12.0))
                 .pl(px(28.0))
                 .bg(theme::SLATE_50),
+        )
+        .child(
+            div()
+                .absolute()
+                .left(px(8.0))
+                .top(px(0.0))
+                .bottom(px(0.0))
+                .flex()
+                .items_center()
+                .child(icon_sized(Icon::Search, px(13.0)).text_color(theme::SLATE_400)),
         );
 
     // ── 目录列表 ──

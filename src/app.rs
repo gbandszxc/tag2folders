@@ -1812,6 +1812,7 @@ impl AppShell {
                     .child(
                         Input::new(&self.scan.filter_input)
                             .h(px(32.0))
+                            .py(px(0.0))
                             .pl(px(28.0))
                             .text_size(px(12.5)),
                     )
@@ -1819,7 +1820,10 @@ impl AppShell {
                         div()
                             .absolute()
                             .left(px(9.0))
-                            .top(px(9.0))
+                            .top(px(0.0))
+                            .bottom(px(0.0))
+                            .flex()
+                            .items_center()
                             .child(
                                 icon_sized(Icon::Search, px(13.0)).text_color(theme::SLATE_400),
                             ),
@@ -2128,11 +2132,12 @@ impl AppShell {
             .child(
                 Input::new(&self.preview.template_input)
                     .h(px(38.0))
+                    .py(px(0.0))
+                    .px(px(12.0))
                     .text_size(px(13.0))
                     .font_family(theme::FONT_MONO),
             )
             .child(chips_row);
-
         // ── 4.2.2-3 操作模式 toggle + 移动警告条 ──
         let mut mode_block = div()
             .child(field_label("操作模式"))
@@ -2562,21 +2567,25 @@ impl AppShell {
                                     .relative()
                                     .w(px(140.0))
                                     .child(
+                                        Input::new(&self.preview.tree_filter)
+                                            .h(px(28.0))
+                                            .py(px(0.0))
+                                            .text_size(px(12.0))
+                                            .pl(px(24.0))
+                                            .pr(px(8.0)),
+                                    )
+                                    .child(
                                         div()
                                             .absolute()
                                             .left(px(8.0))
-                                            .top(px(8.0))
+                                            .top(px(0.0))
+                                            .bottom(px(0.0))
+                                            .flex()
+                                            .items_center()
                                             .child(
                                                 icon_sized(Icon::Search, px(12.0))
                                                     .text_color(theme::SLATE_400),
                                             ),
-                                    )
-                                    .child(
-                                        Input::new(&self.preview.tree_filter)
-                                            .h(px(28.0))
-                                            .text_size(px(12.0))
-                                            .pl(px(24.0))
-                                            .pr(px(8.0)),
                                     ),
                             )
                             .child(
