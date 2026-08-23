@@ -1,14 +1,9 @@
 //! 后台整理任务：注册表 + 进度快照。
 //!
-//! 对应源项目 src-tauri/src/task.rs（自 backend/core/task_manager.py 移植）。
-//! GPUI 版差异（桌面化适配）：
-//! - 去掉 Tauri 事件 `progress://{task_id}` 发射——源前端本就完全依赖
-//!   `get_task_status` 每 1000ms 轮询（见 docs/SOURCE_SPEC.md 5.3），
-//!   GPUI 版沿用轮询，快照注册表语义不变；
-//! - 后台执行线程沿用 `std::thread::spawn`（源项目即如此，未用 tauri::async_runtime）；
-//! - 终态任务 5 分钟后惰性淘汰，防止长期驻留内存。
-//!
-//! 状态机语义、快照结构、终态保留 300 秒、容量上限 32 与源项目完全一致。
+//! - UI 通过 `get_task_status` 轮询快照消费进度（默认 1s 一次）；
+//! - 后台执行线程为 `std::thread::spawn`；
+//! - 终态任务 5 分钟（300s）后惰性淘汰，防止长期驻留内存；
+//! - 注册表容量上限 32，满时淘汰最旧终态任务。
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -20,7 +15,7 @@ use serde::Serialize;
 
 use crate::core::{path_util, organizer, FileMappingItem, OrganizeMode};
 
-/// 终态任务在注册表中的存活时长（与 Python 端 TTL 一致）
+/// 终态任务在注册表中的存活时长
 const TERMINAL_TASK_TTL: Duration = Duration::from_secs(300);
 /// 注册表容量上限：超出时淘汰最旧的终态任务
 const MAX_TASKS: usize = 32;
@@ -34,7 +29,7 @@ pub enum TaskStatus {
     Error,
 }
 
-/// 进度事件（字段与前端 ProgressEvent 接口逐一对齐）
+/// 进度事件快照。
 #[derive(Debug, Clone, Serialize)]
 pub struct ProgressEvent {
     pub task_id: String,
@@ -102,9 +97,7 @@ fn evict_expired(reg: &mut HashMap<String, TaskState>) {
     reg.retain(|_, s| !matches!(s.terminal_at, Some(t) if now.duration_since(t) > TERMINAL_TASK_TTL));
 }
 
-/// 更新注册表快照。
-/// 源项目同时向 `progress://{task_id}` Tauri 事件通道广播；GPUI 版前端
-/// 纯靠 `get_task_status` 轮询消费快照，事件发射已移除（见模块注释）。
+/// 更新注册表快照（UI 轮询 get_task_status 消费）。
 fn publish(event: ProgressEvent, terminal_at: Option<Instant>) {
     if let Ok(mut reg) = registry().lock() {
         reg.insert(
@@ -117,7 +110,7 @@ fn publish(event: ProgressEvent, terminal_at: Option<Instant>) {
     }
 }
 
-/// 后台执行器：逐条执行预计划的移动/复制（移植自 _run_organize）。
+/// 后台执行器：逐条执行预计划的移动/复制。
 pub fn run_organize(task_id: String, mappings: Vec<FileMappingItem>, mode: OrganizeMode) {
     let total = mappings.len();
 

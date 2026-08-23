@@ -1,9 +1,9 @@
-//! DirPicker 目录选择组件(SOURCE_SPEC 第 3 章)。
+//! DirPicker 目录选择组件。
 //!
 //! 结构:`Entity<DirPickerState>`(自含状态) + 每帧渲染函数。
 //! - 主行:输入框(mono,左侧 FolderIcon、有值且未禁用时右侧清空按钮)+ 浏览按钮
 //! - 浏览按钮:优先调 **gpui 原生目录对话框**(`prompt_for_paths`);
-//!   打开失败时降级为**内置目录浏览模态**(browse_dirs 服务,SPEC 3.3 逐项实现)
+//!   打开失败时降级为**内置目录浏览模态**(browse_dirs 服务)
 //! - 对外事件:`DirPickerEvent::Changed(path)` / `DirPickerEvent::Enter`
 //!   (App/页面用 `cx.subscribe` 消费;ScanPage 的 Enter 快捷扫描靠后者)
 //!
@@ -43,7 +43,7 @@ struct BrowseState {
     current_path: String,
     entries: Vec<DirEntry>,
     loading: bool,
-    /// 竞态 token:navigate 发起时 +1,回调比对丢弃过期响应(SPEC 3.3 navigate)
+    /// 竞态 token:navigate 发起时 +1,回调比对丢弃过期响应
     token: u64,
 }
 
@@ -52,9 +52,9 @@ pub struct DirPickerState {
     pub input: Entity<InputState>,
     /// 是否禁用整个组件
     pub disabled: bool,
-    /// 可选 label(SPEC 3.1)
+    /// 可选 label
     pub label: Option<SharedString>,
-    /// 可选错误文案(SPEC 3.1:fontSize 12、rose-600、marginTop 4)
+    /// 可选错误文案
     pub error: Option<SharedString>,
 
     modal: BrowseState,
@@ -70,7 +70,7 @@ pub struct DirPickerState {
 impl EventEmitter<DirPickerEvent> for DirPickerState {}
 
 impl DirPickerState {
-    /// `placeholder` 默认值由调用方给(SPEC 3.1 默认 `请选择或输入目录路径...`)。
+    /// `placeholder` 默认值由调用方给(约定默认 `请选择或输入目录路径...`)。
     pub fn new(
         placeholder: impl Into<SharedString>,
         window: &mut Window,
@@ -106,7 +106,7 @@ impl DirPickerState {
                 }
             }
         }));
-        // 模态路径输入:Enter → navigate(输入框当前值);Blur → 重置回 currentPath(SPEC 3.3)
+        // 模态路径输入:Enter → navigate(输入框当前值);Blur → 重置回 currentPath
         subs.push(cx.subscribe_in(&path_input, window, |this, _, ev: &gpui_component::input::InputEvent, window, cx| {
             match ev {
                 gpui_component::input::InputEvent::PressEnter { .. } => {
@@ -158,7 +158,7 @@ impl DirPickerState {
         self.set_value("", window, cx);
     }
 
-    // ── 浏览(SPEC 3.2)───────────────────────────────────────────────────────
+    // ── 浏览───────────────────────────────────────────────────────
 
     /// 浏览按钮点击:原生对话框优先,失败降级内置模态。
     pub fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -190,7 +190,7 @@ impl DirPickerState {
         .detach();
     }
 
-    /// 打开降级目录浏览模态:过滤重置 + navigate(value || '')(SPEC 3.3)。
+    /// 打开降级目录浏览模态:过滤重置 + navigate(value || '')。
     pub fn open_browse_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let filter_input = self.filter_input.clone();
         filter_input.update(cx, |state, cx| state.set_value("", window, cx));
@@ -207,7 +207,7 @@ impl DirPickerState {
         cx.notify();
     }
 
-    /// navigate(path):loading → browse_dirs → 更新 current/entries;失败静默(SPEC 3.3)。
+    /// navigate(path):loading → browse_dirs → 更新 current/entries;失败静默。
     pub fn navigate(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
         self.modal.token += 1;
         let token = self.modal.token;
@@ -242,7 +242,7 @@ impl DirPickerState {
         self.close_browse_modal(cx);
     }
 
-    /// 过滤后的条目(name 小写子串匹配,SPEC 3.3)。
+    /// 过滤后的条目(name 小写子串匹配)。
     fn filtered_entries(&self, cx: &App) -> Vec<DirEntry> {
         let filter = self.filter_input.read(cx).value().to_lowercase();
         if filter.is_empty() {
@@ -369,7 +369,7 @@ pub fn render_dir_picker(
     div().child(col).child(with_modal)
 }
 
-/// 降级目录浏览模态(SPEC 3.3)。
+/// 降级目录浏览模态。
 fn render_browse_modal(
     dp: &Entity<DirPickerState>,
     _window: &mut Window,
@@ -624,7 +624,7 @@ fn render_browse_modal(
     .key_handler(modal_focus, {
         let dp2 = dp.clone();
         move |_e: &gpui::KeyDownEvent, _window, cx| {
-            // Escape → 关闭模态(SPEC 3.3 路径输入 Escape;提升到卡片级,
+            // Escape → 关闭模态(提升到卡片级,
             // 覆盖焦点在任意输入框时的 Escape)
             // 注:仅 escape 关闭;Enter 由路径输入的 PressEnter 事件处理
             if _e.keystroke.key == "escape" {
@@ -638,7 +638,7 @@ fn render_browse_modal(
     .child(preview)
 }
 
-// ── getParentPath(SPEC 3.4,逐分支照抄)──────────────────────────────────────
+// ── getParentPath(路径拼接,跨平台分支)──────────────────────────────────────
 
 pub fn get_parent_path(p: &str) -> String {
     if p.is_empty() {
@@ -677,7 +677,7 @@ pub fn get_parent_path(p: &str) -> String {
 mod tests {
     use super::get_parent_path;
 
-    /// SPEC 3.4 getParentPath 各分支(路径拼接逻辑,纯字符串,跨平台一致)
+    /// getParentPath 各分支(路径拼接逻辑,纯字符串,跨平台一致)
     #[test]
     fn parent_path_branches() {
         assert_eq!(get_parent_path(""), "");

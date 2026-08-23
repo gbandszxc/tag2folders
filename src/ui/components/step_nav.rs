@@ -1,4 +1,4 @@
-//! 左侧步骤向导栏(SOURCE_SPEC 1.6)。
+//! 左侧步骤向导栏。
 //!
 //! 三步骤(文案/副标题/图标照抄 STEPS 常量);StepItem 状态机:
 //! done(已完成)/ active(进行中)/ dimmed(未解锁,opacity 0.5)/ 默认(已解锁未激活)。
@@ -16,7 +16,7 @@ use gpui::{
 use crate::ui::theme;
 use crate::ui::{Icon, icon_sized};
 
-/// 步骤定义(SOURCE_SPEC 1.6 STEPS 常量,顺序固定)。
+/// 步骤定义(顺序固定)。
 pub struct StepDef {
     pub num: usize,
     pub label: &'static str,
@@ -92,7 +92,7 @@ impl StepNav {
         let unlocked = step.num <= self.max_unlocked;
         let dimmed = !unlocked;
 
-        // 38×38 图标瓦片分态(SPEC 1.6 表)
+        // 38×38 图标瓦片分态
         let (tile_bg, tile_fg, show_check) = if done {
             (theme::EMERALD_50, theme::EMERALD_600, true)
         } else if active {
@@ -210,11 +210,9 @@ impl StepNav {
     }
 }
 
-/// 侧栏容器(SPEC 1.6 aside):白底、右边框、padding 20px 14px、纵向滚动。
+/// 侧栏容器:白底、右边框、padding 20px 14px、纵向滚动。
 ///
-/// 宽度源值为 `clamp(210px, 22vw, 250px)`。gpui 无 vw/clamp 长度,取区间中值
-/// 230px 近似(1100px 设计窗口下 22vw=242,最小 900px 窗口下被夹为 210;
-/// 固定 230 的最大偏差 ±12px,已记录 KNOWN_DIFFERENCES)。
+/// 宽度固定 230px(900~1100px 窗口宽度区间的折中值)。
 pub fn step_nav_aside() -> gpui::Stateful<gpui::Div> {
     div()
         .id("step-nav-scroll")

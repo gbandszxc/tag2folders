@@ -1,10 +1,9 @@
-//! 内联提示条(SOURCE_SPEC 7.6:无 toast,全部内联;rose=错误 / amber=警告 / sky=信息)。
+//! 内联提示条(无 toast,全部内联;rose=错误 / amber=警告 / sky=信息)。
 //!
-//! 样式基准(4.1.2 / 4.1.3 等):flex、gap 10、padding 10px 14px、圆角 8px、
-//! 图标 15 + 文本 fontSize 12.5。文字色按 SPEC 7.9 陷阱:rose-800 / sky-800
-//! 未定义,等效 #0f172a;amber 系文字色为 amber-800。
+//! 样式:flex、gap 10、padding 10px 14px、圆角 8px、图标 15 + 文本
+//! fontSize 12.5。rose/sky 文字色用近黑 #0f172a;amber 系文字色为 amber-800。
 //!
-//! 支持多行文本(PreviewPage 错误条 whiteSpace: pre-wrap)。
+//! 支持多行文本(错误条 pre-wrap)。
 
 #![allow(dead_code)]
 
@@ -32,7 +31,7 @@ impl AlertVariant {
                 theme::ROSE_50,
                 theme::ROSE_200,
                 theme::ROSE_600,
-                theme::INHERITED_TEXT, // var(--rose-800) 未定义 → #0f172a(SPEC 7.9)
+                theme::INHERITED_TEXT, // 近黑 #0f172a
             ),
             AlertVariant::Amber => (
                 theme::AMBER_50,
@@ -44,7 +43,7 @@ impl AlertVariant {
                 theme::SKY_50,
                 theme::SKY_200,
                 theme::SKY_600,
-                theme::INHERITED_TEXT, // var(--sky-800) 未定义 → #0f172a(SPEC 7.9)
+                theme::INHERITED_TEXT, // 近黑 #0f172a
             ),
         }
     }

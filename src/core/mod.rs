@@ -1,13 +1,12 @@
-//! 核心业务模块：从 Python 后端 1:1 移植。
+//! 核心业务模块。
 //!
-//! 模块划分与 `backend/core` 保持一致，便于对照溯源：
-//! - `scanner`      目录扫描
-//! - `metadata`     音频元数据提取（lofty 替代 mutagen）
-//! - `template`     目标路径模板渲染
+//! - `scanner`       目录扫描
+//! - `metadata`      音频元数据提取（lofty）
+//! - `template`      目标路径模板渲染
 //! - `path_security` 路径安全校验
-//! - `path_util`    Python pathlib/os.path 语义的路径工具
-//! - `organizer`    文件整理（计划 + 执行）
-//! - `preview`      预览（映射生成 + 预检，源自 backend/api/routes/preview.py 与 organize.py）
+//! - `path_util`     路径工具（规范化/父目录/边界与权限探测）
+//! - `organizer`     文件整理（计划 + 执行）
+//! - `preview`       预览（映射生成 + 预检）
 
 pub mod metadata;
 pub mod organizer;
@@ -19,8 +18,7 @@ pub mod template;
 
 use serde::{Deserialize, Serialize};
 
-/// 单个音频文件的元数据（对应 Python `AudioMetadata` / 前端 `AudioFileInfo`）。
-/// 字段名与序列化形式必须与现有前端 `types.ts` 保持一致（snake_case）。
+/// 单个音频文件的元数据（snake_case 序列化，UI 层按此消费，勿改字段名）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioMetadata {
     pub path: String,
@@ -45,7 +43,7 @@ pub enum OrganizeMode {
     Copy,
 }
 
-/// 预览映射项的执行状态（序列化值与 Python 端完全一致）。
+/// 预览映射项的执行状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MappingStatus {

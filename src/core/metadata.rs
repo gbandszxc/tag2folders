@@ -1,5 +1,4 @@
-//! 音频元数据提取（lofty 替代 mutagen）。
-//! 移植自 backend/core/metadata.py。
+//! 音频元数据提取（lofty）。
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -13,7 +12,7 @@ use lofty::tag::Tag;
 
 use crate::core::AudioMetadata;
 
-/// 兜底值，必须与 Python 端 _FALLBACKS 完全一致（preview 的 missing_metadata 判断依赖）。
+/// 兜底值（preview 的 missing_metadata 判断依赖这些确切字符串，勿改动）。
 pub const FALLBACK_ARTIST: &str = "Unknown Artist";
 pub const FALLBACK_ALBUM: &str = "Unknown Album";
 pub const FALLBACK_TITLE: &str = "Unknown Title";
@@ -405,7 +404,7 @@ mod tests {
         chunk
     }
 
-    // ── 移植自 tests/test_core.py 的 test_extract_metadata_* ─────────────────
+    // ── extract_metadata 单元测试 ─────────────────
 
     /// 空 .mp3 文件应返回 readable=false 且全部兜底值。
     #[test]

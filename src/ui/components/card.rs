@@ -1,4 +1,4 @@
-//! 卡片(SOURCE_SPEC 2.5):白底、圆角 12、边框 subtle、阴影 xs、overflow hidden;
+//! 卡片:白底、圆角 12、边框 subtle、阴影 xs、overflow hidden;
 //! 可选头部(title/subtitle/actions)与主体 padding 档位。
 
 #![allow(dead_code)]
@@ -137,7 +137,7 @@ impl RenderOnce for Card {
             card
         };
 
-        // 主体 padding:none 0 / sm 12x16 / md 18x22 / lg 24x28(SPEC 2.5)
+        // 主体 padding:none 0 / sm 12x16 / md 18x22 / lg 24x28
         let (pad_y, pad_x) = match self.padding {
             CardPadding::None => (px(0.0), px(0.0)),
             CardPadding::Sm => (px(12.0), px(16.0)),

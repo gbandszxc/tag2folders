@@ -2,9 +2,9 @@
 // stderr 句柄若被父进程显式提供仍可写入,不影响 shot 取证的 eprintln!。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! Tag2Folders GPUI 版入口。
+//! Tag2Folders 应用入口。
 //!
-//! - 窗口参数照抄 SPEC 1.1:标题 `Tag2Folders`、1100×750、最小 900×600、可缩放
+//! - 窗口:标题 `Tag2Folders`、1100×750、最小 900×600、可缩放
 //! - `gpui_component::init` 最先调用(官方要求),随后把全局主题换成我们的
 //!   设计 token(`ui::theme::apply_to_gpui_component`)
 //! - 窗口根视图必须是 `gpui_component::Root`(组件库的 Dialog/Notification 层
@@ -28,7 +28,7 @@ fn main() {
         .with_assets(Assets)
         .run(|cx: &mut App| {
             gpui_component::init(cx);
-            // 换肤:把 gpui-component 色板映射为源项目设计 token(SPEC 第 6 章)
+            // 换肤:把 gpui-component 色板映射为本项目设计 token(ui::theme)
             ui::theme::apply_to_gpui_component(cx);
 
             let bounds = Bounds::centered(None, size(px(1100.), px(750.)), cx);
@@ -50,7 +50,7 @@ fn main() {
                     },
                     |window, cx| {
                         let shell = cx.new(|cx| AppShell::new(window, cx));
-                        // 窗口关闭确认(SPEC 1.5):must 在实体创建后注册
+                        // 窗口确认关闭:must 在实体创建后注册
                         AppShell::register_close_guard(&shell, window, cx);
                         *cell.borrow_mut() = Some(shell.clone());
                         cx.new(|cx| gpui_component::Root::new(shell, window, cx))

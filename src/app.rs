@@ -1,6 +1,6 @@
-//! 应用外壳(SOURCE_SPEC 第 1 章):顶栏 + 左步骤栏 + 右工作区 + 状态机 + 重置确认。
+//! 应用外壳:顶栏 + 左步骤栏 + 右工作区 + 状态机 + 重置确认。
 //!
-//! ## 状态架构(给后续页面 agent 的约定)
+//! ## 状态架构约定
 //!
 //! - 根实体为 [`AppShell`](实现 Render),持有全部向导状态:
 //!   `current_step` / `max_unlocked_step` / 三个页面结构体 / 待挂载的 Modal 状态;
@@ -8,11 +8,10 @@
 //!   页面内部需要高交互控件时,持有对应 `Entity`(如 `Entity<DirPickerState>`、
 //!   `Entity<InputState>`),在页面构造函数里 `cx.new` + `cx.subscribe` 建立
 //!   事件回路(订阅句柄 `Subscription` 存进 AppShell,随 reset 一起丢弃重建);
-//! - `reset_key` 语义:源项目通过 React `key` 强制重挂载三页清空内部状态;
-//!   GPUI 版 [`AppShell::reset`] 直接**重建页面结构体**(等价重挂载),并归位
+//! - [`AppShell::reset`] **重建页面结构体**清空三页内部状态,并归位
 //!   step/max_unlocked/清理 taskId;
-//! - "三个页面始终挂载"的源语义(仅 display 切换、保留状态)由"struct 字段
-//!   常驻 + render 按 current_step 切换"天然满足。
+//! - "三个页面状态常驻"(切页不丢页面内部状态)由"struct 字段常驻 + render
+//!   按 current_step 切换"满足。
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -42,9 +41,9 @@ use crate::ui::service::{run_service_in, run_service_result};
 use crate::ui::theme;
 use crate::ui::{Icon, icon_16, icon_sized};
 
-// ── 页面(后续页面 agent 在此扩展)──────────────────────────────────────────
+// ── 页面──────────────────────────────────────────
 
-/// 筛选字段(SOURCE_SPEC 4.1.5 FILTER_FIELDS;key 与源前端 filterField 值一致)。
+/// 扫描页快速筛选字段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterField {
     Filename,
@@ -66,7 +65,7 @@ impl FilterField {
         (FilterField::Genre, "流派"),
     ];
 
-    /// 源前端字段 key。
+    /// 小写字段 key。
     pub fn key(self) -> &'static str {
         match self {
             FilterField::Filename => "filename",
@@ -97,24 +96,23 @@ fn basename(p: &str) -> &str {
     p.rsplit(['/', '\\']).next().unwrap_or(p)
 }
 
-/// 筛选匹配规则(SPEC 4.1.5):大小写不敏感的子串包含。`kw_lower` 已 trim+lowercase。
+/// 筛选匹配规则:大小写不敏感的子串包含。`kw_lower` 已 trim+lowercase。
 fn matches_filter(field: FilterField, kw_lower: &str, f: &AudioMetadata) -> bool {
     field.value_of(f).to_lowercase().contains(kw_lower)
 }
 
-/// 表格最多渲染行数(SOURCE_SPEC 4.1.6 TABLE_LIMIT=200;纯 UI 截断,父级数据完整)。
+/// 表格最多渲染行数(纯 UI 截断,父级数据完整)。
 const TABLE_LIMIT: usize = 200;
 
-/// 表格体容器最大高度:源为整页滚动 + sticky 表头,GPUI 版改为容器内滚动 +
-/// 固定表头行(见 docs/KNOWN_DIFFERENCES.md)。
+/// 表格体容器最大高度:表头固定行 + 表体容器内滚动(gpui 无 position:sticky)。
 const TABLE_BODY_MAX_H: Pixels = px(480.0);
 
-// ── 预览页常量(SOURCE_SPEC 4.2 / 2.13)────────────────────────────────────
+// ── 预览页常量────────────────────────────────────
 
 /// 模板默认值 / 输入框占位文案(默认 `{album}/{track}. {title}.{ext}`，track 不足两位补零)。
 const DEFAULT_TEMPLATE: &str = "{album}/{track}. {title}.{ext}";
 
-/// 占位符芯片全表(SPEC 4.2.2 PLACEHOLDERS;tag 带花括号、中文小标)。
+/// 占位符芯片全表。
 const PLACEHOLDERS: [(&str, &str); 7] = [
     ("{artist}", "艺术家"),
     ("{album}", "专辑"),
@@ -125,32 +123,32 @@ const PLACEHOLDERS: [(&str, &str); 7] = [
     ("{ext}", "后缀"),
 ];
 
-/// 映射表最多渲染行数(SPEC 4.2.4 TABLE_LIMIT=300;纯 UI 截断,父级数据完整)。
+/// 映射表最多渲染行数。
 const PREVIEW_TABLE_LIMIT: usize = 300;
 
-/// 目录树默认展开深度(SPEC 2.13 initialExpandedDepth=2:展开 0、1 层)。
+/// 目录树默认展开深度。
 const TREE_INITIAL_EXPANDED_DEPTH: usize = 2;
 
 /// 目录树哨兵键(子树内直接文件列表)与转义形式(见 preview.rs build_directory_tree)。
 const TREE_SENTINEL: &str = "__files__";
 const TREE_ESCAPED_SENTINEL: &str = "__files__\u{0}";
 
-/// 目录树主体最大/最小高度(SPEC 2.13 maxHeight;PreviewPage 传 420)。
+/// 目录树主体最大/最小高度。
 const TREE_BODY_MAX_H: Pixels = px(420.0);
 const TREE_BODY_MIN_H: Pixels = px(140.0);
 
-// ── 进度页常量(SOURCE_SPEC 4.3)───────────────────────────────────────────
+// ── 进度页常量───────────────────────────────────────────
 
-/// 日志缓冲上限(SPEC 4.3.7 LOG_CAP=300,超出丢弃最旧)。
+/// 日志缓冲上限。
 const LOG_CAP: usize = 300;
 
-/// 日志控制台最大高度(SPEC 4.3.7 maxHeight 260)。
+/// 日志控制台最大高度。
 const LOG_CONSOLE_MAX_H: Pixels = px(260.0);
 
-/// 滚动锚定阈值(SPEC 4.3.7:距底 <40px 视为"停留底部",新日志自动跟随)。
+/// 滚动锚定阈值。
 const LOG_BOTTOM_ANCHOR: Pixels = px(40.0);
 
-/// 任务状态轮询间隔(SPEC 4.3.8 setInterval 1000ms)。
+/// 任务状态轮询间隔。
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// task_id 持久化文件:数据目录 `<data>/tag2folders/state.json`
@@ -158,7 +156,7 @@ const POLL_INTERVAL: Duration = Duration::from_secs(1);
 const STATE_DIR: &str = "tag2folders";
 const STATE_FILE: &str = "state.json";
 
-/// 预览结果区视图切换(SPEC 4.2.4 activeTab)。
+/// 预览结果区视图切换。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewTab {
     /// 详细映射列表
@@ -167,7 +165,7 @@ pub enum PreviewTab {
     Tree,
 }
 
-/// 步骤 1:扫描文件(SOURCE_SPEC 4.1)。页面为普通 struct(状态挂在 AppShell 上),
+/// 步骤 1:扫描文件。页面为普通 struct(状态挂在 AppShell 上),
 /// 高交互控件(DirPicker/筛选输入)持有独立 Entity。
 pub struct ScanPage {
     /// 源目录选择(值 = `dir.read(cx).value()`)
@@ -207,7 +205,7 @@ impl ScanPage {
     }
 
     /// 筛选结果:关键词 trim 后为空 → 原样返回;否则按当前字段做大小写不敏感
-    /// 子串匹配(SPEC 4.1.5,与源 filteredFiles 一致)。
+    /// 子串匹配。
     fn filtered_files(&self, cx: &gpui::App) -> Vec<AudioMetadata> {
         let kw_raw = self.filter_input.read(cx).value();
         let kw = kw_raw.trim().to_lowercase();
@@ -222,7 +220,7 @@ impl ScanPage {
     }
 }
 
-/// 步骤 2:模板预览(SOURCE_SPEC 4.2)。页面为普通 struct(状态挂在 AppShell 上),
+/// 步骤 2:模板预览。页面为普通 struct(状态挂在 AppShell 上),
 /// 高交互控件(目标目录 DirPicker / 模板输入 / 树过滤输入)持有独立 Entity。
 pub struct PreviewPage {
     /// 目标目录选择(placeholder 动态:留空则整理到源目录(源目录))
@@ -242,7 +240,7 @@ pub struct PreviewPage {
     pub resolved_target_dir: String,
     /// 结果区视图切换(list=映射表 / tree=目录树)
     pub active_tab: PreviewTab,
-    /// 目录树过滤输入(SOURCE_SPEC 2.13 `过滤文件...`)
+    /// 目录树过滤输入
     pub tree_filter: Entity<InputState>,
     /// 目录树全部展开开关(源 expandAll;翻转 = 源 key 变更强制重挂载、重置全部开合)
     pub tree_expand_all: bool,
@@ -292,7 +290,7 @@ fn empty_tree() -> serde_json::Value {
     serde_json::Value::Object(Default::default())
 }
 
-/// 开始整理前剔除的状态(SOURCE_SPEC 4.2.5:后端预检会整批拒绝这三类)。
+/// 开始整理前剔除的状态(后端预检会整批拒绝这三类)。
 fn is_organizable(m: &FileMappingItem) -> bool {
     !matches!(
         m.status,
@@ -300,8 +298,8 @@ fn is_organizable(m: &FileMappingItem) -> bool {
     )
 }
 
-/// 树节点默认开合(SOURCE_SPEC 2.13:`defaultOpen && depth < initialExpandedDepth`,
-/// 即默认展开 0、1 层);用户手动切换过的节点取反,expandAll 翻转后重置。
+/// 树节点默认开合(默认展开 0、1 层);用户手动切换过的节点取反,
+/// expandAll 翻转后重置。
 fn tree_node_open(expand_all: bool, user_toggled: bool, depth: usize) -> bool {
     let default_open = expand_all && depth < TREE_INITIAL_EXPANDED_DEPTH;
     if user_toggled {
@@ -311,8 +309,7 @@ fn tree_node_open(expand_all: bool, user_toggled: bool, depth: usize) -> bool {
     }
 }
 
-/// 目录树过滤(SOURCE_SPEC 2.13):文件名小写子串匹配(`f.toLowerCase()
-/// .includes(filter.toLowerCase())`);空过滤全通过。
+/// 目录树过滤:文件名小写子串匹配;空过滤全通过。
 fn tree_file_matches(file: &str, filter_lower: &str) -> bool {
     filter_lower.is_empty() || file.to_lowercase().contains(&filter_lower.to_lowercase())
 }
@@ -327,7 +324,7 @@ fn decode_tree_key(key: &str) -> &str {
     }
 }
 
-/// 步骤 3:执行整理(SOURCE_SPEC 4.3)。页面为普通 struct(状态挂在
+/// 步骤 3:执行整理。页面为普通 struct(状态挂在
 /// AppShell 上);轮询循环与 task_id 持久化在 AppShell 层——token 必须跨
 /// 页面重建存续(同 scan_token/preview_token,见 progress_token 字段)。
 pub struct ProgressPage {
@@ -336,7 +333,7 @@ pub struct ProgressPage {
     /// 任务已发起(startOrganize 成功或重连)后为 true(源 started;
     /// 控制"准备开始"卡与进度区/终态横幅的互斥)
     pub started: bool,
-    /// 实时日志行(SPEC 4.3.7:上限 300,current_file 行与上一行相同不追加)
+    /// 实时日志行
     pub log: Vec<String>,
     /// 日志控制台滚动句柄(滚动锚定:新日志到达且停留在底部附近时自动跟随)
     pub log_scroll: ScrollHandle,
@@ -415,9 +412,9 @@ fn clear_persisted_task_id() {
     }
 }
 
-// ── 进度页纯逻辑辅助(SOURCE_SPEC 4.3.4 / 4.3.7)─────────────────────────
+// ── 进度页纯逻辑辅助─────────────────────────
 
-/// pct = progress && total>0 ? round(current/total*100) : 0(SPEC 4.3.4)。
+/// pct = progress && total>0 ? round(current/total*100) : 0。
 fn task_percent(progress: Option<&ProgressEvent>) -> usize {
     progress
         .and_then(|p| {
@@ -426,7 +423,7 @@ fn task_percent(progress: Option<&ProgressEvent>) -> usize {
         .unwrap_or(0)
 }
 
-/// 日志行颜色分级(SPEC 4.3.7 LogLine):源正则 `^(\[[^\]]*\])\s*(.*)$` 的
+/// 日志行颜色分级:源正则 `^(\[[^\]]*\])\s*(.*)$` 的
 /// 等价实现——行首 `[...]`(首个 `]` 即闭括号)为前缀,`\s*` 消耗其后的
 /// 全部空白;返回 (前缀含括号, 余文)。不匹配返回 None(整行 slate-400)。
 fn split_log_line(line: &str) -> Option<(&str, &str)> {
@@ -439,7 +436,7 @@ fn split_log_line(line: &str) -> Option<(&str, &str)> {
     Some((prefix, rest))
 }
 
-/// 追加 message 日志行(SPEC 4.3.7:该分支无去重,仅上限截断)。
+/// 追加 message 日志行。
 fn append_log_line(log: &mut Vec<String>, line: String) {
     log.push(line);
     if log.len() > LOG_CAP {
@@ -447,7 +444,7 @@ fn append_log_line(log: &mut Vec<String>, line: String) {
     }
 }
 
-/// 追加 current_file 日志行(SPEC 4.3.7:与上一行完全相同则不追加)。
+/// 追加 current_file 日志行。
 fn append_log_line_dedup(log: &mut Vec<String>, line: String) {
     if log.last().map(|l| l == &line).unwrap_or(false) {
         return;
@@ -455,7 +452,7 @@ fn append_log_line_dedup(log: &mut Vec<String>, line: String) {
     append_log_line(log, line);
 }
 
-/// 日志控制台是否停留在底部附近(距底 ≤40px,SPEC 4.3.7 滚动锚定)。
+/// 日志控制台是否停留在底部附近(距底 ≤40px,滚动锚定阈值)。
 /// 依据 gpui ScrollHandle:max_offset.height + offset.y 即距底像素
 /// (内容未溢出时为 0,天然视为"在底部",与源 atBottomRef 初始 true 一致)。
 fn log_is_at_bottom(handle: &ScrollHandle) -> bool {
@@ -466,9 +463,9 @@ fn log_is_at_bottom(handle: &ScrollHandle) -> bool {
 
 #[derive(Debug)]
 enum ConfirmAction {
-    /// 顶栏"重置"(SPEC 1.4)
+    /// 顶栏"重置"
     Reset,
-    /// 窗口关闭(SPEC 1.5;description/tip 视任务状态两变体)
+    /// 窗口关闭
     Exit,
 }
 
@@ -482,7 +479,7 @@ struct PendingConfirm {
 pub struct AppShell {
     /// 当前步骤 1|2|3
     current_step: usize,
-    /// 已解锁的最大步骤 1|2|3(点击规则:只能访问 ≤ 此值,SPEC 1.6/1.7)
+    /// 已解锁的最大步骤 1|2|3(点击规则:只能访问 ≤ 此值)
     max_unlocked_step: usize,
     /// 重置计数(源 resetKey;重建页面即等价重挂载,计数仅供诊断/动画 key)
     reset_key: u32,
@@ -512,16 +509,16 @@ pub struct AppShell {
     pub preview: PreviewPage,
     pub progress: ProgressPage,
 
-    /// 扫描竞态 token(SPEC 4.1.8):输入变更/递归切换时 +1,在途响应比对后丢弃。
+    /// 扫描竞态 token:输入变更/递归切换时 +1,在途响应比对后丢弃。
     /// 放 AppShell(而非 ScanPage)是因为 reset 会重建页面结构体,token 必须
     /// 跨重建单调递增,才能丢弃"重置前发起"的在途扫描(等价源卸载时 token+1)。
     scan_token: u64,
 
-    /// 预览请求竞态 token(SPEC 4.2.3 abortRef):表单变更/新预览/reset 时 +1,
+    /// 预览请求竞态 token:表单变更/新预览/reset 时 +1,
     /// 回调比对后丢弃过期响应。与 scan_token 同理放 AppShell 跨页面重建。
     preview_token: u64,
 
-    /// 任务发起/轮询竞态 token(SPEC 4.3.8 竞态防护):reset、新任务发起、
+    /// 任务发起/轮询竞态 token:reset、新任务发起、
     /// 重连时 +1。start_organize 回调比对后丢弃过期响应;轮询循环比对后自杀。
     /// 与 scan_token 同理放 AppShell 跨页面重建。
     progress_token: u64,
@@ -564,7 +561,7 @@ impl AppShell {
         // 扫描页/预览页事件回路(见 wire_page_subscriptions)
         shell.wire_page_subscriptions(window, cx);
 
-        // 任务重连(SPEC 7.7 刷新重连语义的桌面等价):读取持久化 task_id,
+        // 任务重连:读取持久化 task_id,
         // 任务仍在注册表内(终态未超 300s 被淘汰)→ 恢复轮询追踪(页面状态
         // 保持步骤 1,与源刷新后 currentStep=1、mappings 丢失一致);
         // 已过期/不存在 → 静默清空(含持久化文件),停留步骤 1。
@@ -582,14 +579,14 @@ impl AppShell {
         shell
     }
 
-    // ── 步骤状态机(SPEC 1.7)───────────────────────────────────────────────
+    // ── 步骤状态机───────────────────────────────────────────────
 
     /// (重)建立页面事件回路。`new` 与 `reset` 都要调用:页面结构体重建后,
-    /// 订阅必须指向新实体(订阅句柄随 reset 一起丢弃重建,见 UI_INTEGRATION §2)。
+    /// 订阅必须指向新实体(订阅句柄随 reset 一起丢弃重建)。
     fn wire_page_subscriptions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self._subs.clear();
 
-        // 扫描页:DirPicker 事件(SPEC 4.1.8)
+        // 扫描页:DirPicker 事件
         let scan_dir = self.scan.dir.clone();
         self._subs.push(cx.subscribe_in(
             &scan_dir,
@@ -608,7 +605,7 @@ impl AppShell {
             &scan_filter,
             |_this, _entity, _ev: &InputEvent, cx| cx.notify(),
         ));
-        // 预览页(SPEC 4.2.3 表单变更效应):目标目录变化 → 作废已有预览结果
+        // 预览页:目标目录变化 → 作废已有预览结果
         let preview_dir = self.preview.dir.clone();
         self._subs.push(cx.subscribe(
             &preview_dir,
@@ -650,7 +647,7 @@ impl AppShell {
         }
     }
 
-    // ── 扫描页逻辑(SOURCE_SPEC 4.1.8)─────────────────────────────────────
+    // ── 扫描页逻辑─────────────────────────────────────
 
     /// 开始扫描:token 竞态防护 + 后台线程执行(重 IO 不阻塞 UI)。
     /// 回调带 window:handleScanComplete 需更新预览页目标目录 placeholder(InputState)。
@@ -705,7 +702,7 @@ impl AppShell {
         self.on_scan_input_changed(window, cx);
     }
 
-    /// 输入变更效应(SPEC 4.1.8 useEffect [sourceDir, recursive]):
+    /// 输入变更效应:
     /// 清本页 files/error/loading/hasScanned/filterKeyword、token+1 丢弃在途响应,
     /// 并 `onScanComplete([], '')` 同步清空 App 级扫描数据(锁回步骤 1)。
     fn on_scan_input_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -720,7 +717,7 @@ impl AppShell {
         self.handle_scan_complete(Vec::new(), String::new(), window, cx);
     }
 
-    /// App 级 handleScanComplete(SOURCE_SPEC 1.7):写入 scannedFiles/sourceDir、
+    /// App 级 handleScanComplete:写入 scannedFiles/sourceDir、
     /// 解锁状态机推进(有数据 → max_unlocked ≥ 2;无数据锁回 1 并回步骤 1)。
     /// 同时清 App 级整理批次(源:setMappings([]) + setOrganizeMode('copy') +
     /// setTargetDir('');**页面本地状态保留不清**——三页常驻,源亦如此)。
@@ -735,8 +732,8 @@ impl AppShell {
         self.scanned_files = files;
         self.source_dir = dir;
         self.clear_organize_batch();
-        // 预览页目标目录 placeholder 动态拼源目录(SPEC 4.2.2:
-        // `留空则整理到源目录（{sourceDir}）`;清空时回落基础文案)
+        // 预览页目标目录 placeholder 动态拼源目录
+        // (`留空则整理到源目录（{sourceDir}）`;清空时回落基础文案)
         let placeholder = if self.source_dir.is_empty() {
             "留空则整理到源目录".to_string()
         } else {
@@ -755,7 +752,7 @@ impl AppShell {
         cx.notify();
     }
 
-    /// "下一步:设置模板"(SPEC 4.1.7 handleNext):有筛选词时先把筛选子集
+    /// "下一步:设置模板":有筛选词时先把筛选子集
     /// 提交为 App 级数据(下游预览只用被筛过的文件),再切到步骤 2。
     fn handle_next(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let keyword = self.scan.filter_input.read(cx).value().to_string();
@@ -769,7 +766,7 @@ impl AppShell {
         cx.notify();
     }
 
-    /// 全量重置(SPEC 1.4 确认后 / SPEC 4.3.5 "完成并开启新任务"直接调用)。
+    /// 全量重置。
     /// 语义:回步骤 1、max_unlocked=1、清空页面数据(重建页面结构体)、清
     /// taskId(内存 + 数据目录持久化文件)并停止任务轮询。
     pub fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -795,7 +792,7 @@ impl AppShell {
         cx.notify();
     }
 
-    // ── 预览页逻辑(SOURCE_SPEC 4.2.3 / 4.2.5)─────────────────────────────
+    // ── 预览页逻辑─────────────────────────────
 
     /// App 级 onClearOrganize(源 App.tsx 默认为 copy，本项目改为 move):mappings=[]、organizeMode='move'、
     /// targetDir=''。预览失败/表单变更/重扫描时调用,防止旧计划被执行。
@@ -812,7 +809,7 @@ impl AppShell {
         self.preview.resolved_target_dir.clear();
     }
 
-    /// 表单变更效应(SPEC 4.2.3 useEffect [template, targetDir, mode]):
+    /// 表单变更效应:
     /// 作废在途响应 + 清本地预览结果 + onClearOrganize("开始执行整理"随之消失)。
     fn invalidate_preview_results(&mut self, cx: &mut Context<Self>) {
         self.preview_token += 1; // abort:在途响应过期
@@ -850,7 +847,7 @@ impl AppShell {
         self.invalidate_preview_results(cx);
     }
 
-    /// 点击占位符芯片(SPEC 4.2.2 insertPlaceholder):聚焦中 → 在**光标位置**
+    /// 点击占位符芯片:聚焦中 → 在**光标位置**
     /// 插入(gpui-component InputState::insert 取内部光标,插入后光标落在
     /// 插入文本末尾,等价源 setSelectionRange);未聚焦 → 追加到末尾。随后
     /// 聚焦输入框(源 requestAnimationFrame focus)。
@@ -868,7 +865,7 @@ impl AppShell {
         });
     }
 
-    /// 生成预览(SPEC 4.2.3 handlePreview)。
+    /// 生成预览。
     fn handle_preview(&mut self, cx: &mut Context<Self>) {
         let template_raw = self.preview.template_input.read(cx).value().to_string();
         if template_raw.trim().is_empty() {
@@ -916,7 +913,7 @@ impl AppShell {
                 match result {
                     Ok(resp) => {
                         if !resp.template_errors.is_empty() {
-                            // Ok 路径模板错误(SPEC 4.2.3):'；' 连接
+                            // Ok 路径模板错误:'；' 连接
                             this.preview.error = Some(resp.template_errors.join("；"));
                             this.clear_preview_results();
                         } else {
@@ -934,10 +931,10 @@ impl AppShell {
         );
     }
 
-    /// 开始执行整理(SPEC 4.2.5 handleStartOrganize):剔除 unreadable /
+    /// 开始执行整理:剔除 unreadable /
     /// boundary_error / write_error 三类必然被预检整批拒绝的映射,把整理参数
     /// 交给 App 级状态(D5 进度页消费),解锁并进入步骤 3。
-    /// **无二次确认弹窗**(SPEC 7.1:移动模式的防护 = 静态警告条 + 进度页文案)。
+    /// **无二次确认弹窗**。
     fn handle_start_organize(&mut self, cx: &mut Context<Self>) {
         let organizable: Vec<FileMappingItem> = self
             .preview
@@ -977,9 +974,9 @@ impl AppShell {
         cx.notify();
     }
 
-    // ── 进度页逻辑(SOURCE_SPEC 4.3.3 handleStart / 4.3.8 轮询 / 7.7 重连)──
+    // ── 进度页逻辑──
 
-    /// "开始执行"(SPEC 4.3.3 handleStart):starting 防双击;置 started、清
+    /// "开始执行":starting 防双击;置 started、清
     /// done/error/log/progress → `start_organize(mappings, mode, target_dir)`
     /// (后台线程)→ 成功:写 task_id 并持久化(先持久化再更新界面,POST 在途
     /// 时用户切走任务也保持可重连)、启动轮询;失败:started 回 false(按钮
@@ -1026,13 +1023,13 @@ impl AppShell {
         );
     }
 
-    /// 启动任务状态轮询(SPEC 4.3.8 startPolling):每 1000ms 调一次
+    /// 启动任务状态轮询:每 1000ms 调一次
     /// `get_task_status(task_id)`(id 在启动时捕获,与源 setInterval 闭包一致
     /// ——onOrganize 清空 task_id 不影响已运行循环对旧任务的追踪);快照落地
     /// 见 [`Self::apply_task_snapshot`];done/error 终态停止;查询失败静默
     /// 重试不中断(源 catch 语义)。token 防串:reset/新发起使本循环自杀。
     /// get_task_status 为内存注册表读取(锁 + 小结构克隆,微秒级),直接在
-    /// 主线程 async 上下文执行(见 UI_INTEGRATION §3)。
+    /// 主线程 async 上下文执行。
     fn start_progress_polling(&mut self, cx: &mut Context<Self>) {
         let task_id = self.task_id.clone();
         if task_id.is_empty() {
@@ -1061,13 +1058,13 @@ impl AppShell {
         .detach();
     }
 
-    /// 单次快照落地(SPEC 4.3.8 轮询体逐条):更新 progress;追加日志行
+    /// 单次快照落地:更新 progress;追加日志行
     /// (current_file 非空 → `[current/total] basename` 连续相同不重复,
     /// 否则 message 非空 → 追加 message;滚动锚定);status=done → done=true,
     /// status=error → errMsg = message || `执行出错`,两者均返回 true(停轮询)。
     fn apply_task_snapshot(&mut self, data: Result<ProgressEvent, service::ServiceError>) -> bool {
         let Ok(data) = data else {
-            // 任务不存在/查询失败:静默重试,不中断轮询(SPEC 4.3.8)
+            // 任务不存在/查询失败:静默重试,不中断轮询
             return false;
         };
         // 滚动锚定:以追加前的滚动位置判断用户是否停留在底部附近
@@ -1105,11 +1102,10 @@ impl AppShell {
         }
     }
 
-    /// 是否有进行中/未完成的整理任务(SPEC 1.5 退出确认两变体)。
+    /// 是否有进行中/未完成的整理任务。
     /// 判定:task_id 非空 且 快照未到终态(done/error);尚无快照(刚发起/
-    /// 恢复后未轮到)视为进行中。与源 `Boolean(taskId)` 的差异:源任务终态
-    /// 后不清 taskId(直到用户点"完成并开启新任务"),退出确认会误报"有任务";
-    /// GPUI 版按快照状态判定(见 docs/KNOWN_DIFFERENCES.md)。
+    /// 恢复后未轮到)视为进行中。终态任务不会因退出中断任何处理,不报"有任务"。
+
     fn has_running_task(&self) -> bool {
         if self.task_id.is_empty() {
             return false;
@@ -1273,7 +1269,7 @@ impl AppShell {
         }
     }
 
-    // ── 进度页渲染(SOURCE_SPEC 4.3.1 ~ 4.3.7)────────────────────────────
+    // ── 进度页渲染────────────────────────────
 
     /// 步骤 3 完整页面:无任务数据警告 → 任务概览卡 →(未发起)准备开始卡 /
     /// (进行中)执行进度卡 / 终态横幅(完成/失败)→ 实时日志控制台。
@@ -1661,7 +1657,7 @@ impl AppShell {
                                         .child("任务执行失败"),
                                 )
                                 .child(
-                                    // rose-800 未定义陷阱 → #0f172a(SPEC 7.9);
+                                    // rose-800 未定义陷阱 → #0f172a;
                                     // pre-wrap:多行错误(如 preflight_errors)换行展示
                                     div()
                                         .mt(px(4.0))
@@ -1717,7 +1713,7 @@ impl AppShell {
         page.into_any_element()
     }
 
-    // ── 扫描页渲染(SOURCE_SPEC 4.1.1 ~ 4.1.7)──────────────────────────────
+    // ── 扫描页渲染──────────────────────────────
 
     /// 步骤 1 完整页面:配置卡(源目录/递归/开始扫描)→ 错误/空结果提示 →
     /// 结果卡(看板计数/筛选/文件表格)→ 底部导航条。
@@ -1742,7 +1738,7 @@ impl AppShell {
         );
         let on_recursive = cx.listener(|this, checked: &bool, window, cx| {
             this.scan.recursive = *checked;
-            // recursive 变化同样触发输入变更效应(SPEC 4.1.8 useEffect 依赖)
+            // recursive 变化同样触发输入变更效应
             this.on_scan_input_changed(window, cx);
         });
         let on_clear_filter_bar = cx.listener(
@@ -1755,7 +1751,7 @@ impl AppShell {
             |this, _e: &gpui::ClickEvent, window, cx| this.handle_next(window, cx),
         );
 
-        // 筛选栏(SPEC 4.1.5):前缀文字 + 字段胶囊(单选) + 关键词输入 + 清空
+        // 筛选栏:前缀文字 + 字段胶囊(单选) + 关键词输入 + 清空
         let mut filter_bar = div()
             .flex()
             .flex_wrap()
@@ -1840,7 +1836,7 @@ impl AppShell {
                 )
             });
 
-        // 配置卡(SPEC 4.1.1)——render_dir_picker 需要 &mut App,最后借用 cx
+        // 配置卡——render_dir_picker 需要 &mut App,最后借用 cx
         let app: &mut gpui::App = cx;
         let config_card = card()
             .title("扫描源目录")
@@ -1882,11 +1878,11 @@ impl AppShell {
         // 页面骨架
         let mut page = div().flex().flex_col().w_full().child(config_card);
 
-        // 错误提示(SPEC 4.1.2)
+        // 错误提示
         if let Some(err) = error.clone() {
             page = page.child(AlertBar::new(AlertVariant::Rose, err).mt(px(12.0)));
         }
-        // 空结果提示(SPEC 4.1.3):hasScanned && !loading && !error && 0 文件
+        // 空结果提示:hasScanned && !loading && !error && 0 文件
         if has_scanned && !loading && error.is_none() && files_empty {
             page = page.child(
                 AlertBar::new(
@@ -1899,9 +1895,9 @@ impl AppShell {
             );
         }
 
-        // 结果区(SPEC 4.1.4 ~ 4.1.7,files 非空才整体显示)
+        // 结果区
         if !files_empty {
-            // 看板计数行(SPEC 4.1.4)
+            // 看板计数行
             let pills_row = div()
                 .flex()
                 .flex_wrap()
@@ -1937,7 +1933,7 @@ impl AppShell {
                     ))
                 });
 
-            // 表格区(SPEC 4.1.6):无匹配空态 / 表格 + 截断提示
+            // 表格区:无匹配空态 / 表格 + 截断提示
             let display: &Vec<AudioMetadata> = if filter_active {
                 &filtered
             } else {
@@ -1978,7 +1974,7 @@ impl AppShell {
                 .child(pills_row)
                 .child(filter_bar)
                 .child(table_area);
-            // 截断提示行(SPEC 4.1.6 表尾)
+            // 截断提示行
             if display.len() > TABLE_LIMIT {
                 stats_card = stats_card.child(
                     div()
@@ -1998,7 +1994,7 @@ impl AppShell {
             }
             page = page.child(stats_card);
 
-            // 底部导航条(SPEC 4.1.7;源为 sticky bottom,GPUI 无 sticky → 常规流)
+            // 底部导航条
             page = page.child(
                 div()
                     .mt(px(16.0))
@@ -2044,7 +2040,7 @@ impl AppShell {
         page.into_any_element()
     }
 
-    /// 清空筛选(SPEC 4.1.5):keyword='' 且 field='filename'。
+    /// 清空筛选:keyword='' 且 field='filename'。
     fn clear_scan_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.scan.filter_field = FilterField::Filename;
         let filter_input = self.scan.filter_input.clone();
@@ -2052,7 +2048,7 @@ impl AppShell {
         cx.notify();
     }
 
-    // ── 预览页渲染(SOURCE_SPEC 4.2.1 ~ 4.2.5)──────────────────────────────
+    // ── 预览页渲染──────────────────────────────
 
     /// 步骤 2 完整页面:无文件警告 → 整理配置卡(目标目录 / 命名模板+占位符
     /// chips / 操作模式 toggle+移动警告 / 错误条 / 生成预览按钮)→ 结果区
@@ -2242,8 +2238,7 @@ impl AppShell {
             let organizable_count =
                 mappings.len() - unreadable_count - boundary_count - write_count;
 
-            // 统计 StatCard 网格(SPEC 4.2.4;grid auto-fit minmax(150,1fr) →
-            // flex wrap + min-w 150,见 KNOWN_DIFFERENCES)
+            // 统计 StatCard 网格(flex wrap + 每卡 min-width 150)
             let stats_grid = div()
                 .mt(px(18.0))
                 .flex()
@@ -2304,7 +2299,7 @@ impl AppShell {
                     theme::ROSE_700,
                 ));
 
-            // Tab 切换行(SPEC 2.10 Tabs;tree 激活时右侧附注)
+            // Tab 切换行
             let tab_row = div()
                 .mt(px(16.0))
                 .flex()
@@ -2389,7 +2384,7 @@ impl AppShell {
                     .into_any_element(),
             };
 
-            // 底部导航条(SPEC 4.2.4;源为 sticky bottom,GPUI 常规流,同扫描页)
+            // 底部导航条
             let bottom_nav = div()
                 .mt(px(16.0))
                 .flex()
@@ -2467,7 +2462,7 @@ impl AppShell {
         page.into_any_element()
     }
 
-    // ── 目录树渲染(SOURCE_SPEC 2.13 DirectoryTreeView)──────────────────────
+    // ── 目录树渲染──────────────────────
 
     /// 目录树组件外壳:头部工具栏(Layers 标题 / 过滤输入 / 全部折叠切换)+
     /// 主体(容器内滚动、min 140 / max 420、bg slate-50)+ 空态。
@@ -2476,7 +2471,7 @@ impl AppShell {
         let filter_lower = filter_raw.to_lowercase();
 
         // "全部折叠"/"全部展开"切换:翻转 expandAll 并清空用户开合记录
-        // (等价源 key 变更强制重挂载、各节点回默认开合)
+        // (各节点回到默认开合)
         let on_expand_toggle = cx.listener(|this, _e: &gpui::ClickEvent, _window, cx| {
             this.preview.tree_expand_all = !this.preview.tree_expand_all;
             this.preview.tree_toggled.clear();
@@ -2484,7 +2479,7 @@ impl AppShell {
         });
 
         // 主体:根层遍历(子目录对象键 + `__files__` 文件组;serde_json Map 为
-        // BTreeMap 按字典序,与源 JS 对象插入序略有差异,见 KNOWN_DIFFERENCES)
+        // BTreeMap,同层目录/文件按字典序排列)
         let tree = &self.preview.directory_tree;
         let root_empty = tree.as_object().map(|o| o.is_empty()).unwrap_or(true);
         let body_inner: gpui::AnyElement = if root_empty {
@@ -2619,7 +2614,7 @@ impl AppShell {
     }
 
     /// 目录节点行(递归):箭头 + 文件夹图标 + 目录名 + 数量徽标 `(直接子项数)`;
-    /// 展开时先渲染子目录、后渲染 `__files__` 文件组(SPEC 2.13)。
+    /// 展开时先渲染子目录、后渲染 `__files__` 文件组。
     fn render_tree_node(
         &self,
         path_key: &str,
@@ -2713,7 +2708,7 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 根容器:100vh、纵向 flex、bg-app(SPEC 1.2)
+        // 根容器:100vh、纵向 flex、bg-app
         let shell = div()
             .id("app-shell")
             .flex()
@@ -2726,14 +2721,14 @@ impl Render for AppShell {
             .text_size(theme::FONT_SIZE_BASE)
             // 顶栏
             .child(self.render_header(window, cx))
-            // 中段:aside + main(SPEC 1.2)
+            // 中段:aside + main
             .child(
                 div()
                     .flex()
                     .flex_1()
                     .min_h(px(0.0))
                     .child(step_nav_aside().child({
-                        // 步骤点击:仅 ≤ max_unlocked_step 可达(SPEC 1.6)
+                        // 步骤点击:仅 ≤ max_unlocked_step 可达
                         let on_step = cx.listener(|this, step: &usize, _window, cx| {
                             this.go_to_step(*step, cx);
                         });
@@ -2785,7 +2780,7 @@ impl Render for AppShell {
 
 // ── 扫描页渲染辅助 ───────────────────────────────────────────────────────────
 
-/// 看板计数胶囊(SPEC 4.1.4 StatPill):badge 加强版,padding 6px 12px、fontSize 12、
+/// 看板计数胶囊:badge 加强版,padding 6px 12px、fontSize 12、
 /// gap 7;label opacity 0.75 / weight 500,数值 13.5 / weight 700。
 fn stat_pill(variant: BadgeVariant, icon: Icon, label: &str, value: usize) -> gpui::Div {
     let (_, fg, _) = variant.colors();
@@ -2809,7 +2804,7 @@ fn stat_pill(variant: BadgeVariant, icon: Icon, label: &str, value: usize) -> gp
         )
 }
 
-/// 表格列定义(SPEC 4.1.6):(列名, 宽度百分比)。
+/// 表格列定义:(列名, 宽度百分比)。
 const SCAN_TABLE_COLS: [(&str, f32); 5] = [
     ("文件名", 0.30),
     ("艺术家", 0.18),
@@ -2818,7 +2813,7 @@ const SCAN_TABLE_COLS: [(&str, f32); 5] = [
     ("状态", 0.10),
 ];
 
-/// 表头单元格:padding 10px 12px、weight 600、slate-600、bg slate-50(SPEC 2.7)。
+/// 表头单元格:padding 10px 12px、weight 600、slate-600、bg slate-50。
 fn scan_header_cell(width: f32, label: &str) -> gpui::Div {
     div()
         .w(DefiniteLength::Fraction(width))
@@ -2831,7 +2826,7 @@ fn scan_header_cell(width: f32, label: &str) -> gpui::Div {
         .child(label.to_string())
 }
 
-/// 正文单元格:padding 9px 12px、slate-700、内容 truncate(SPEC 2.7)。
+/// 正文单元格:padding 9px 12px、slate-700、内容 truncate。
 fn scan_text_cell(width: f32, text: &str) -> gpui::Div {
     div()
         .w(DefiniteLength::Fraction(width))
@@ -2842,7 +2837,7 @@ fn scan_text_cell(width: f32, text: &str) -> gpui::Div {
         .child(div().truncate().child(text.to_string()))
 }
 
-/// 文件表格(SPEC 4.1.6):外层水平滚动(表 minWidth 560)、固定表头、
+/// 文件表格:外层水平滚动(表 minWidth 560)、固定表头、
 /// 表体容器内垂直滚动(≤200 行直接构建,不虚拟化);行 hover 底色 slate-50、
 /// 无斑马纹/无选中态;状态列 StatusBadge sm(ok/unreadable)。
 fn render_scan_table(display: &[AudioMetadata]) -> impl IntoElement {
@@ -2895,9 +2890,9 @@ fn render_scan_table(display: &[AudioMetadata]) -> impl IntoElement {
         .child(div().flex().flex_col().min_w(px(560.0)).child(header).child(body))
 }
 
-// ── 预览页渲染辅助(SOURCE_SPEC 2.10 ~ 2.13 / 4.2)────────────────────────────
+// ── 预览页渲染辅助────────────────────────────
 
-/// 表单字段标签(SPEC 4.2.2):fontSize 13、weight 600、slate-700、marginBottom 6。
+/// 表单字段标签:fontSize 13、weight 600、slate-700、marginBottom 6。
 fn field_label(text: &str) -> gpui::Div {
     div()
         .text_size(px(13.0))
@@ -2907,9 +2902,9 @@ fn field_label(text: &str) -> gpui::Div {
         .child(text.to_string())
 }
 
-// ── 进度页渲染辅助(SOURCE_SPEC 4.3.2 / 4.3.7)────────────────────────────────
+// ── 进度页渲染辅助────────────────────────────────
 
-/// 概览卡字段小标签(SPEC 4.3.2):fontSize 11.5、slate-500、marginBottom 4。
+/// 概览卡字段小标签:fontSize 11.5、slate-500、marginBottom 4。
 fn overview_label(text: &str) -> gpui::Div {
     div()
         .text_size(px(11.5))
@@ -2918,7 +2913,7 @@ fn overview_label(text: &str) -> gpui::Div {
         .child(text.to_string())
 }
 
-/// 日志行(SPEC 4.3.7 LogLine):`[n/total]` 前缀琥珀 amber-400 #ffc533、
+/// 日志行:`[n/total]` 前缀琥珀 amber-400 #ffc533、
 /// 正文天蓝 sky-300 #bae6fd;不匹配整行 slate-400。
 fn render_log_line(ix: usize, line: &str) -> gpui::Stateful<gpui::Div> {
     let row = div().id(SharedString::from(format!("log-line-{ix}")));
@@ -2931,7 +2926,7 @@ fn render_log_line(ix: usize, line: &str) -> gpui::Stateful<gpui::Div> {
     }
 }
 
-/// 分段控件按钮(SPEC 2.10 Tabs;4.2.2 操作模式 toggle 同款分段样式):
+/// 分段控件按钮:
 /// 激活 = weight 600 + amber-800 + 白底 + 圆角 6 + shadow-xs;
 /// 未激活 = weight 500 + slate-600 + 透明底。可选计数徽章(list Tab)。
 fn segment_btn(
@@ -2986,9 +2981,9 @@ fn segment_btn(
     btn
 }
 
-/// 占位符芯片(SPEC 2.12 PlaceholderChip):TagIcon 12 + 等宽 tag(weight 600)+
+/// 占位符芯片:TagIcon 12 + 等宽 tag(weight 600)+
 /// 中文小标 11(常态 slate-500 / 悬浮 amber-800);悬浮 = amber-400 边框 +
-/// amber-100 底 + 深色文字(源 `--amber-950` 未定义 → #0f172a,SPEC 7.9)。
+/// amber-100 底 + 深色文字(#0f172a)。
 /// hover 逐子元素变色在 gpui 需页面持有 hover 状态(on_hover 上提实现)。
 fn placeholder_chip(
     ix: usize,
@@ -3047,7 +3042,7 @@ fn placeholder_chip(
         .on_hover(move |hovered: &bool, window, cx| on_hover(hovered, window, cx))
 }
 
-/// 移动模式警告条(SPEC 4.2.2):amber-50 底 / amber-200 边框、圆角 8、
+/// 移动模式警告条:amber-50 底 / amber-200 边框、圆角 8、
 /// padding 10 14;AlertTriangle 16 amber-600;文字 12.5 amber-800、行高 1.6,
 /// "移动模式不可逆："加粗(StyledText 高亮,等价源 `<strong>`)。
 fn move_mode_warning() -> gpui::Div {
@@ -3086,7 +3081,7 @@ fn move_mode_warning() -> gpui::Div {
         )
 }
 
-/// StatCard(SPEC 2.11,非 compact 档):白底、圆角 12、阴影 xs、padding 16 18、
+/// StatCard:白底、圆角 12、阴影 xs、padding 16 18、
 /// 左列(标题 12/500/slate-500 + 数值 22/700/变体色)+ 右侧 38px 图标方块
 /// (变体底色/图标色);边框色随变体。
 fn stat_card(
@@ -3146,12 +3141,12 @@ fn stat_card(
         )
 }
 
-/// 映射表列定义(SPEC 4.2.4):(列名, 宽度百分比)。
+/// 映射表列定义:(列名, 宽度百分比)。
 const PREVIEW_TABLE_COLS: [(&str, f32); 3] = [("源文件", 0.38), ("目标路径", 0.46), ("最终状态", 0.16)];
 
-/// 映射表(SPEC 4.2.4):源文件(basename)38% / 目标路径(final_target 完整
+/// 映射表:源文件(basename)38% / 目标路径(final_target 完整
 /// 路径)46% / 最终状态(StatusBadge sm)16%;表 minWidth 560 + 外层水平滚动、
-/// 固定表头 + 表体容器内滚动(同扫描页,见 KNOWN_DIFFERENCES);行 hover 底色
+/// 固定表头 + 表体容器内滚动(同扫描页);行 hover 底色
 /// slate-50、无斑马纹;**冲突行无特殊底色**(以 amber 徽章表达,源行为);
 /// 行不可点击。最多渲染 300 行(截断提示由调用方追加)。
 fn render_mapping_table(mappings: &[FileMappingItem]) -> impl IntoElement {
@@ -3209,7 +3204,7 @@ fn tree_files_of(v: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// 文件行组(`__files__` 叶子,SPEC 2.13):FileAudioIcon 14 amber-600 +
+/// 文件行组(`__files__` 叶子):FileAudioIcon 14 amber-600 +
 /// 等宽文件名 12.5 slate-700、truncate、hover slate-100;缩进 (depth+1)*20+8;
 /// **整组无过滤匹配则不渲染**(目录节点不过滤,仅文件)。
 fn render_tree_files(files: &[String], depth: usize, filter_lower: &str) -> gpui::Div {
@@ -3247,8 +3242,7 @@ fn render_tree_files(files: &[String], depth: usize, filter_lower: &str) -> gpui
 
 // ── 窗口关闭确认挂接 ─────────────────────────────────────────────────────────
 //
-// gpui 0.2.2 存在 `window.on_window_should_close(cx, f)`(返回 false 可阻止关闭),
-// 因此源项目的关闭确认弹窗(SPEC 1.5)可以等价实现,不列入 KNOWN_DIFFERENCES。
+// 基于 gpui 0.2.2 的 `window.on_window_should_close(cx, f)`(返回 false 可阻止关闭)。
 
 impl AppShell {
     /// 在窗口根视图构建后调用(见 main.rs):注册"点关闭按钮先确认"。
@@ -3457,7 +3451,7 @@ mod tests {
         assert_eq!(basename(""), "");
     }
 
-    /// 筛选匹配:大小写不敏感子串;filename 字段只匹配 basename(SPEC 4.1.5)
+    /// 筛选匹配:大小写不敏感子串;filename 字段只匹配 basename
     #[test]
     fn filter_matches_case_insensitive_substring() {
         let f = meta("/m/Beat It.mp3", "Michael Jackson", "1982", "Pop", true);
@@ -3472,7 +3466,7 @@ mod tests {
         assert!(matches_filter(FilterField::Filename, "song", &w));
     }
 
-    // ── 预览页(SPEC 4.2)──────────────────────────────────────────────────
+    // ── 预览页──────────────────────────────────────────────────
 
     fn mapping(status: MappingStatus) -> FileMappingItem {
         FileMappingItem {
@@ -3486,7 +3480,7 @@ mod tests {
         }
     }
 
-    /// 开始整理前剔除三类不可执行映射(SPEC 4.2.5):unreadable /
+    /// 开始整理前剔除三类不可执行映射:unreadable /
     /// boundary_error / write_error;保留 ok/conflict/batch_conflict/missing_metadata
     #[test]
     fn organizable_filter_excludes_blocked_statuses() {
@@ -3504,7 +3498,7 @@ mod tests {
         assert!(organizable.iter().all(|m| is_organizable(m)));
     }
 
-    /// 目录树节点开合(SPEC 2.13):默认展开 0/1 层;用户切换取反;
+    /// 目录树节点开合:默认展开 0/1 层;用户切换取反;
     /// expandAll 关闭后默认全收起(用户记录同时被清空,由调用方保证)
     #[test]
     fn tree_node_open_follows_default_and_user_toggle() {
@@ -3520,7 +3514,7 @@ mod tests {
         assert!(!tree_node_open(false, false, 1));
     }
 
-    /// 目录树过滤(SPEC 2.13):文件名小写子串匹配;空过滤全通过
+    /// 目录树过滤:文件名小写子串匹配;空过滤全通过
     #[test]
     fn tree_file_filter_is_case_insensitive_substring() {
         assert!(tree_file_matches("Song.mp3", ""));
@@ -3537,9 +3531,9 @@ mod tests {
         assert_eq!(decode_tree_key("__files__"), "__files__");
     }
 
-    // ── 进度页(SPEC 4.3)──────────────────────────────────────────────────
+    // ── 进度页──────────────────────────────────────────────────
 
-    /// 日志行颜色分级(SPEC 4.3.7):`[...]` 前缀 + 正文;`\s*` 消耗全部空白;
+    /// 日志行颜色分级:`[...]` 前缀 + 正文;`\s*` 消耗全部空白;
     /// 不匹配(无 `[` 开头/无闭括号)→ None;空括号 `[]` 是合法前缀
     #[test]
     fn log_line_splits_bracket_prefix() {
@@ -3551,7 +3545,7 @@ mod tests {
         assert_eq!(split_log_line(""), None);
     }
 
-    /// 日志去重与上限(SPEC 4.3.7 / 7.8):current_file 行仅连续相同去重,
+    /// 日志去重与上限:current_file 行仅连续相同去重,
     /// message 行无去重;缓冲上限 300 丢弃最旧
     #[test]
     fn log_dedup_and_cap() {
@@ -3581,7 +3575,7 @@ mod tests {
         assert_eq!(big.last().unwrap(), &format!("line {}", LOG_CAP + 9));
     }
 
-    /// pct = round(current/total*100);无快照或 total=0 → 0(SPEC 4.3.4)
+    /// pct = round(current/total*100);无快照或 total=0 → 0
     #[test]
     fn task_percent_rounds_and_defaults_zero() {
         let ev = |cur: usize, total: usize| ProgressEvent {

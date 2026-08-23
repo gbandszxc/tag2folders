@@ -1,17 +1,16 @@
 //! 音频文件扫描：发现目录下的受支持音频文件。
-//! 移植自 backend/core/scanner.py。
 
 use std::fs;
 use std::path::Path;
 
 use crate::core::path_util;
 
-/// 受支持的音频扩展名（小写、含点），与 Python 端 SUPPORTED_EXTENSIONS 一致。
+/// 受支持的音频扩展名（小写、含点）。
 pub const SUPPORTED_EXTENSIONS: &[&str] = &[
     ".mp3", ".flac", ".ogg", ".m4a", ".wav", ".aac", ".wma", ".ape", ".opus",
 ];
 
-/// 扫描错误，对应 Python 端抛出的异常（FastAPI 层转换为 404/400/403）。
+/// 扫描错误（文案直接展示给用户）。
 #[derive(Debug)]
 pub enum ScanError {
     NotFound(String),
@@ -31,7 +30,7 @@ impl std::fmt::Display for ScanError {
 
 /// 递归扫描 *path* 下的音频文件，返回排序后的绝对路径列表。
 ///
-/// 行为对齐 Python `scan_directory`：
+/// 行为要点：
 /// - 先解析为绝对路径（`resolve_lenient`，容忍不存在路径的词法解析）
 /// - 不存在 → NotFound；非目录 → NotADirectory；不可读 → PermissionDenied
 /// - 无权限的子目录静默跳过；结果排序返回

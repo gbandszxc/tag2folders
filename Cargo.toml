@@ -20,17 +20,18 @@ name = "tag2folders"
 path = "src/main.rs"
 
 [dependencies]
-# UI 框架（crates.io 注册表版本，禁止混用 git 依赖的 gpui——见 docs/GPUI_NOTES.md 第 1 节）
-# runtime_shaders：把 Metal shader 编译从构建期（需要 `xcrun metal`，本机仅有
-# Command Line Tools 无该工具）延迟到运行期（macOS 系统 Metal 框架自带运行时
-# 编译器，无需开发者工具链）。见 docs/PORT_NOTES.md §5。
-# 装好完整 Xcode + Metal Toolchain 后可移除该 feature 恢复构建期编译。
+# UI 框架（crates.io 注册表版本；禁止混用 git 依赖的 gpui，会与 gpui-component
+# 产生双版本类型冲突）
+# runtime_shaders：把 Metal shader 编译从构建期（需要 `xcrun metal`，仅有
+# Command Line Tools 的环境无该工具）延迟到运行期（macOS 系统 Metal 框架自带
+# 运行时编译器，无需开发者工具链）。装好完整 Xcode + Metal Toolchain 后可移除
+# 该 feature 恢复构建期编译。
 gpui = { version = "0.2.2", features = ["runtime_shaders"] }
 gpui-component = "0.5.1"
 # gpui 依赖树内已有(oneshot 通道 / Future 工具),此处显式声明供 UI 层使用
 futures = "0.3"
 
-# 后端业务依赖（与源项目 src-tauri/Cargo.toml 保持一致）
+# 后端业务依赖
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 lofty = "0.22"
@@ -38,7 +39,7 @@ regex = "1"
 uuid = { version = "1", features = ["v4"] }
 dunce = "1"
 filetime = "0.2"
-# 数据目录定位：GPUI 版用数据目录持久化 task_id（替代源前端的 localStorage）
+# 数据目录定位：持久化 task_id（数据目录 tag2folders/state.json）
 dirs = "5"
 # 仅截图取证路径使用（T2F_SHOT_* 环境变量，见 src/shot.rs）；
 # image 0.25 / block 0.1 已在 gpui 依赖树内，直连不增加新编译单元

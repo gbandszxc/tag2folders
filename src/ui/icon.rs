@@ -1,4 +1,4 @@
-//! 图标系统:对应源项目 CommonUI.tsx 的内联 SVG 图标(SOURCE_SPEC 2.1)。
+//! 图标系统:内联 SVG 图标。
 //!
 //! ## 着色机制结论(已读 gpui 0.2.2 源码验证)
 //!
@@ -15,13 +15,13 @@
 //!   即完成"变体换色",无需按颜色生成多份 SVG;
 //! - 图标尺寸用 `.size(px(n))` 指定(SVG viewBox 为 24×24,等比缩放)。
 
-#![allow(dead_code)] // token 表/图标枚举/服务辅助为后续页面 agent 预留,当前未全部使用
+#![allow(dead_code)] // token 表/图标枚举保留全量,当前未全部使用
 
 use gpui::prelude::*;
 use gpui::{Pixels, Svg, px, svg};
 
 
-/// 图标枚举(32 个,与源 CommonUI.tsx 导出一一对应;命名沿用 Lucide)。
+/// 图标枚举(命名沿用 Lucide)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
     Folder,
@@ -151,7 +151,7 @@ pub fn icon_sized(i: Icon, size: Pixels) -> Svg {
     icon(i).size(size)
 }
 
-/// 16px 图标(源组件默认尺寸,SPEC 2.1"默认尺寸 16px")。
+/// 16px 图标(默认尺寸)。
 pub fn icon_16(i: Icon) -> Svg {
     icon(i).size(px(16.0))
 }

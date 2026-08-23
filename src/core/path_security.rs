@@ -1,6 +1,5 @@
 //! 路径安全校验：规范化并验证路径，防目录穿越。
-//! 移植自 backend/core/path_security.py（HTTPException 转为 Err(String)，
-//! 错误文案保持一致，格式 `"{context} ..."`）。
+//! 错误为 `Err(String)`，格式 `"{context} ..."`。
 
 use std::path::{Path, PathBuf};
 

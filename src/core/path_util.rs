@@ -1,7 +1,6 @@
-//! Python pathlib / os.path 语义的路径工具。
+//! 路径工具：规范化、父目录推导、边界检查与权限探测等跨模块共享的路径语义。
 //!
-//! 这些函数在 core 各模块间共享，用于精确复刻 Python 端的路径比较、
-//! 边界检查与权限探测行为。修改签名前必须核对 preview/organizer 的调用方。
+//! 修改签名前必须核对 preview/organizer 的调用方。
 
 use std::collections::VecDeque;
 use std::path::{Component, Path, PathBuf};

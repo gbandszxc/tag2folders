@@ -1,8 +1,6 @@
-//! 自绘按钮(SOURCE_SPEC 2.2)。
+//! 自绘按钮。
 //!
-//! 变体:primary / secondary / outline / ghost / danger(源 `success` 变体为
-//! 无人使用的怪癖,不移植)。尺寸:sm / md / lg。
-//! 常态/悬浮/按下三态色值逐项照抄 SPEC 2.2 表格。
+//! 变体:primary / secondary / outline / ghost / danger。尺寸:sm / md / lg。
 
 #![allow(dead_code)]
 
@@ -94,13 +92,13 @@ impl Button {
         self
     }
 
-    /// 左侧图标(尺寸由调用方按源 SPEC 指定)。
+    /// 左侧图标(尺寸由调用方指定)。
     pub fn icon(mut self, icon: Icon, size: Pixels) -> Self {
         self.icon = Some((icon, size));
         self
     }
 
-    /// 图标放右侧(源 `iconPosition="right"`)。
+    /// 图标放右侧。
     pub fn icon_right(mut self) -> Self {
         self.icon_right = true;
         self
@@ -171,7 +169,7 @@ impl Button {
         self
     }
 
-    /// 按钮内图标尺寸(loading 旋转图标:sm 12 / 其他 14,SPEC 2.2)。
+    /// 按钮内图标尺寸(loading 旋转图标:sm 12 / 其他 14)。
     fn spinner_size(&self) -> Pixels {
         match self.size {
             ButtonSize::Sm => px(12.0),
@@ -191,7 +189,7 @@ impl RenderOnce for Button {
         let effective_disabled = self.disabled || self.loading;
         let has_text = self.label.is_some();
 
-        // 变体三态(常态/悬浮/按下),色值照抄 SPEC 2.2
+        // 变体三态(常态/悬浮/按下)
         let (bg, fg, border, weight_override) = match self.variant {
             ButtonVariant::Primary => (theme::AMBER_500, theme::SLATE_800, theme::AMBER_600, Some(600)),
             ButtonVariant::Secondary => (theme::SLATE_100, theme::SLATE_700, theme::SLATE_200, None),

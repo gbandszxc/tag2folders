@@ -1,5 +1,4 @@
 //! 文件整理：计划目标路径 + 执行移动/复制。
-//! 移植自 backend/core/organizer.py（preflight 移植自 backend/api/routes/organize.py）。
 //! 路径工具见 `core::path_util`。
 
 use std::collections::{HashMap, HashSet};
@@ -387,12 +386,12 @@ fn is_readable(p: &Path) -> bool {
     }
 }
 
-/// 整理执行前的只读预检（移植自 backend/api/routes/organize.py `_preflight_check`）。
+/// 整理执行前的只读预检。
 /// 返回错误列表（空 = 全部通过）。检查项：
 /// 源存在且为文件、移动模式源父目录可写、移动模式源不重复、
 /// 复制模式大小写重命名拒绝、目标不越界且不等于目标根、
 /// 批内最终目标不重复及文件-目录祖先冲突、目标可写。
-/// 错误文案与 Python 端一致。
+/// 错误文案由测试锁定，改动需同步用例。
 pub fn preflight_check(
     mappings: &[FileMappingItem],
     mode: OrganizeMode,

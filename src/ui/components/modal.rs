@@ -1,4 +1,4 @@
-//! 模态框(SOURCE_SPEC 2.8 Modal)与确认弹窗(SPEC 2.9 ConfirmModal)。
+//! 模态框与确认弹窗。
 //!
 //! 实现为 `deferred(...)` 全屏遮罩 + 居中卡片(gpui 官方 popover 模式的模态同构)。
 //! - 遮罩:`--bg-overlay` rgba(15,23,42,0.55),点击空白处触发关闭
@@ -23,7 +23,7 @@ use crate::ui::theme;
 use crate::ui::components::{Button, ButtonVariant};
 use crate::ui::{Icon, icon_sized};
 
-// ── Modal(通用,SPEC 2.8)────────────────────────────────────────────────────
+// ── Modal(通用)────────────────────────────────────────────────────
 
 type CloseHandler = Box<dyn Fn(&mut Window, &mut App) + 'static>;
 type KeyHandler = Box<dyn Fn(&KeyDownEvent, &mut Window, &mut App) + 'static>;
@@ -237,9 +237,9 @@ impl RenderOnce for Modal {
     }
 }
 
-// ── ConfirmModal(SPEC 2.9)──────────────────────────────────────────────────
+// ── ConfirmModal──────────────────────────────────────────────────
 
-/// 语气配置(SPEC 2.9 表):(图标, 图标色, 徽章底, 徽章边框, 确认按钮变体)
+/// 语气配置:(图标, 图标色, 徽章底, 徽章边框, 确认按钮变体)
 fn tone_config(tone: ConfirmTone) -> (Icon, gpui::Rgba, gpui::Rgba, gpui::Rgba, ButtonVariant) {
     match tone {
         ConfirmTone::Warning => (
@@ -282,7 +282,7 @@ pub enum ConfirmTone {
     Primary,
 }
 
-/// ConfirmOptions(对应源 useConfirm 的 options;字段与默认值照抄 SPEC 2.9)。
+/// 确认弹窗选项。
 #[derive(Clone)]
 pub struct ConfirmOptions {
     pub title: Option<SharedString>,

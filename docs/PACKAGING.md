@@ -37,10 +37,8 @@ DMG 内含 `tag2folders.app` 与 `/Applications` 软链接,用户拖拽即完成
 
 1. **二进制**:`cargo build --release`(release profile,无 debug 符号裁剪等特殊配置)。
 2. **图标**:
-   - 源图 `assets/app-icon.png`,是原项目(Tauri 版)`docs/icon/raw.png` 的**逐字节副本**,
-     因此图标与重构前完全一致(圆形插画风格);
-   - 生成 `assets/AppIcon.icns` 缓存:有 `python3 + PIL` 时用 Lanczos 重采样
-     (与原项目 `scripts/generate_icons.py` 同算法,产物与其 icns **像素级一致**,已实测 0.0000/255);
+   - 源图 `assets/app-icon.png`(圆形插画风格);
+   - 生成 `assets/AppIcon.icns` 缓存:有 `python3 + PIL` 时用 Lanczos 重采样(质量更好);
      无 PIL 时退回 `sips`(重采样质量略低,内容仍一致);
    - 缓存 `assets/AppIcon.icns` 随仓库提交,删掉后会按上述规则自动重建。
 3. **.app bundle**(`Contents/` 结构):
@@ -85,12 +83,6 @@ T2F_SKIP_BUILD=1 T2F_BIN=/tmp/tag2folders-universal scripts/build-dmg.sh
 
 (注意:文件名里的 arch 仍取自本机 rustc host,universal 产物建议自行改名加 `universal` 后缀。)
 
-## 历史验证记录
-
-- 2026-08-22:从 HEAD(8877339)构建,DMG 挂载后 bundle 结构/Info.plist/签名校验通过,
-  从挂载卷直接运行 app 成功创建窗口并正常退出;
-  图标与原项目 `src-tauri/icons/icon.icns` 各尺寸像素差 0.0000/255。
-
 # Windows MSI 打包
 
 打包流程同样脚本化:`scripts/build-msi.ps1` + `scripts/tag2folders.wxs`(WiX v5 语法)。
@@ -122,16 +114,12 @@ $env:T2F_WIX='D:\path\wix.exe'; powershell ...         # 用指定 wix.exe
 `assets/app-icon.png` 重建(256px 档 PNG 压缩),但建议直接提交缓存文件
 (当前仓库版由 python+PIL Lanczos 生成,与 macOS icns 管线同源)。
 
-## 安装/卸载验证(2026-08-22)
+## 安装/卸载
 
-从 HEAD 构建 `tag2folders_2.0.1_x64.msi`(5.3 MB):
-- `msiexec /i ... /qn` 静默安装成功,文件/开始菜单/ARP 齐全;
-- `msiexec /a` 管理员映像自校验通过(脚本内建);
-- 与旧 Tauri 版 MSI(同目录、不同 UpgradeCode)共存时文件互不干扰,
-  卸载 Tauri 后 `msiexec /i ... REINSTALL=ALL REINSTALLMODE=amus /qn`
-  可完整修复被共享 KeyPath 带走的文件。
+- `msiexec /i ... /qn` 静默安装,文件/开始菜单/ARP 齐全;
+- `msiexec /a` 管理员映像自校验(脚本内建)。
 
-## 无控制台窗口 / libpng warning(2026-08-22)
+## Windows:无控制台窗口 / libpng warning
 
 现象:双击启动自带终端窗口,持续打印 `libpng warning: iCCP: known incorrect sRGB profile`。
 

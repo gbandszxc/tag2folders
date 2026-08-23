@@ -1,4 +1,4 @@
-//! 徽章(SOURCE_SPEC 2.3 .badge CSS 类)与状态徽章(SPEC 2.4 StatusBadge)。
+//! 徽章与状态徽章。
 
 #![allow(dead_code)]
 
@@ -8,7 +8,7 @@ use gpui::{App, RenderOnce, SharedString, Window, div, px};
 use crate::ui::theme;
 use crate::ui::{Icon, icon_sized};
 
-/// `.badge` 语义色变体(SPEC 2.3 表)。
+/// `.badge` 语义色变体。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BadgeVariant {
     Emerald,
@@ -57,7 +57,7 @@ pub fn badge_text(variant: BadgeVariant, text: impl Into<SharedString>) -> gpui:
     badge(variant).child(text.into())
 }
 
-/// StatusBadge 的状态映射(SPEC 2.4 STATUS_CONFIG,label 原文)。
+/// StatusBadge 的状态映射(标签文案即展示文案)。
 pub fn status_config(status: &str) -> (SharedString, BadgeVariant, Icon) {
     match status {
         "ok" => ("正常".into(), BadgeVariant::Emerald, Icon::CheckCircle),
@@ -72,7 +72,7 @@ pub fn status_config(status: &str) -> (SharedString, BadgeVariant, Icon) {
     }
 }
 
-/// 后端 `MappingStatus` 的字符串形式(序列化值,与源前端 status 字段一致)。
+/// 后端 `MappingStatus` 的字符串形式(序列化值)。
 pub fn mapping_status_str(status: tag2folders_lib::core::MappingStatus) -> &'static str {
     use tag2folders_lib::core::MappingStatus::*;
     match status {
@@ -93,7 +93,7 @@ pub enum StatusBadgeSize {
     Sm,
 }
 
-/// 状态徽章组件(SPEC 2.4):md = padding 2px 8px、fontSize 12、图标 13;
+/// 状态徽章组件:md = padding 2px 8px、fontSize 12、图标 13;
 /// sm = padding 1px 6px、fontSize 11、图标 12。
 #[derive(gpui::IntoElement)]
 pub struct StatusBadge {

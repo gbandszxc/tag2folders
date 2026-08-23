@@ -1,8 +1,7 @@
 //! UI 侧服务调用辅助:把阻塞的服务层函数(`tag2folders_lib::service::*`)
 //! 丢到后台线程执行,完成后回主线程更新实体并 `cx.notify()`。
 //!
-//! 这是**所有页面调用后端的统一入口**(后续页面 agent 直接复用,见
-//! docs/UI_INTEGRATION.md):
+//! 这是**所有页面调用后端的统一入口**:
 //!
 //! ```ignore
 //! run_service(
@@ -19,12 +18,12 @@
 //! );
 //! ```
 //!
-//! 竞态防护(源项目的 token/abort 模式)需调用方自行实现:发起前递增
+//! 竞态防护需调用方自行实现:发起前递增
 //! `request_token`,回调里比对 token 后再落地状态。
 //!
 //! 另外:服务函数本身要求 `Send + 'static`(返回值同样),这是后台线程的硬约束。
 
-#![allow(dead_code)] // token 表/图标枚举/服务辅助为后续页面 agent 预留,当前未全部使用
+#![allow(dead_code)] // token 表/图标枚举保留全量,当前未全部使用
 
 use gpui::{Context, Window};
 
@@ -75,7 +74,7 @@ pub fn run_service_in<T, R>(
 }
 
 /// 便捷封装:直接返回 `Result<R, ServiceError>` 形态的工作函数,
-/// `on_done` 收到 `Result`,错误已转为 `String`(`Display` 与源前端 toError 一致)。
+/// `on_done` 收到 `Result`,错误已转为 `String`。
 pub fn run_service_result<T, R>(
     cx: &mut Context<T>,
     work: impl FnOnce() -> Result<R, tag2folders_lib::service::ServiceError> + Send + 'static,
@@ -91,7 +90,7 @@ pub fn run_service_result<T, R>(
     );
 }
 
-/// 原生目录选择对话框(gpui 自带,替代源 tauri plugin-dialog)。
+/// 原生目录选择对话框(gpui 自带)。
 ///
 /// 返回值:
 /// - `Ok(Some(path))` → 用户选定目录

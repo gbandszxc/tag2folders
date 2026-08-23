@@ -1,5 +1,4 @@
 //! 预览：不触碰文件系统地生成 源→目标 映射。
-//! 移植自 backend/api/routes/preview.py。
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -37,8 +36,7 @@ pub struct PreviewResponse {
     pub directory_tree: serde_json::Value,
 }
 
-/// 预览错误。Template 对应 FastAPI 422 `{"template_errors": [...]}`；
-/// Validation 对应 400 字符串 detail。
+/// 预览错误。Template = 模板校验错误列表；Validation = 校验字符串错误。
 #[derive(Debug)]
 pub enum PreviewError {
     Template(Vec<String>),
@@ -100,15 +98,15 @@ fn component_eq(a: &str, b: &str) -> bool {
 }
 
 /// 生成预览映射。纯只读，不创建任何文件/目录。
-/// 三遍算法 + 文件-目录冲突检测，逐行移植 Python `generate_preview`。
+/// 三遍算法 + 文件-目录冲突检测。
 pub fn generate_preview(req: &PreviewRequest) -> Result<PreviewResponse, PreviewError> {
-    // 模板校验失败 → FastAPI 422 {"template_errors": [...]}
+    // 模板校验失败 → PreviewError::Template
     let template_errors = validate_template(&req.template);
     if !template_errors.is_empty() {
         return Err(PreviewError::Template(template_errors));
     }
 
-    // target_dir 校验失败 → FastAPI 400 字符串 detail
+    // target_dir 校验失败 → Validation 字符串错误
     let target_root = validate_target_dir(&req.target_dir).map_err(PreviewError::Validation)?;
 
     let n = req.files.len();
@@ -266,8 +264,6 @@ pub fn generate_preview(req: &PreviewRequest) -> Result<PreviewResponse, Preview
             final_targets[i] = planned[k].clone();
         }
     }
-    // 注：Python 在此处还会刷新 _organizable_set，但其后并无任何读取（下方
-    // 碰撞检测直接遍历 organizable_idx），属死代码，不移植。
 
     // ── Pass 3：构建带状态的 FileMappingItem ──
     // 检测哪些原始目标在规划前已有磁盘冲突。排除自冲突：源 == 渲染目标
@@ -470,7 +466,7 @@ pub fn build_directory_tree(mappings: &[FileMappingItem], target_root: &Path) ->
 mod tests {
     use super::*;
 
-    // ── 测试辅助（移植自 tests/test_api.py 的 _make_file_info/_preview）──
+    // ── 测试辅助──
 
     fn make_file_info(
         path: &str,

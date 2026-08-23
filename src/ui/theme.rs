@@ -1,14 +1,13 @@
-//! 设计 token(全部数值照抄 docs/SOURCE_SPEC.md 第 6 章,未做任何四舍五入/自创)。
+//! 设计 token 全表(色/圆角/阴影/字体/时长)。
 //!
-//! 颜色注意:**amber 系采用"运行时生效值"**(源 index.css 中 `--amber-*` 被声明两次,
-//! 后声明覆盖;见 SPEC 文首陷阱表)。例如 `--amber-500` 生效值为 `#f59e0b`,
-//! 而非 DESIGN.md 宣称的 `#FFAE00`。
+//! 颜色注意:amber 系数值为历史定下的有效值(如 `AMBER_500 = #f59e0b`,
+//! 与常见色阶惯例不同),不要按色阶惯例"纠正",全 UI 配色按现值调过。
 //!
 //! 常量命名对应 CSS 变量名:`--slate-50` → [`SLATE_50`]、`--bg-app` → [`BG_APP`]。
 //! 颜色统一用 `Rgba`(hex 低 2 位为 alpha),按 gpui 约定可 `impl Into<Hsla>` 直接传给
 //! `.bg()` / `.text_color()` / `.border_color()`。
 
-#![allow(dead_code)] // token 表/图标枚举/服务辅助为后续页面 agent 预留,当前未全部使用
+#![allow(dead_code)] // token 表/图标枚举保留全量,当前未全部使用
 
 use gpui::{BoxShadow, Hsla, Pixels, Rgba, point, px};
 
@@ -39,7 +38,7 @@ color!(SLATE_900 = 0x0f172aff);
 color!(SLATE_950 = 0x020617ff);
 
 // ── 6.2 琥珀色(amber,运行时生效值)─────────────────────────────────────────
-// 注意:--amber-950 不存在(PLACEHOLDER 文字色陷阱见 SPEC 7.9,等效 #0f172a)。
+// 注意:amber-950 无 token;PLACEHOLDER 文字色等效 #0f172a(INHERITED_TEXT)。
 
 color!(AMBER_50 = 0xfffbefff);
 color!(AMBER_100 = 0xfef3c7ff);
@@ -99,8 +98,7 @@ pub const BG_OVERLAY: Hsla = Hsla {
     a: 0.55,
 };
 
-/// 未定义变量陷阱的等效值(SPEC 7.9):`var(--amber-950)` / `var(--rose-800)` /
-/// `var(--sky-800)` 均继承 `--text-primary` = #0f172a。
+/// 深色强调文字(历史等效值 #0f172a,用于浅色横幅上的文字)。
 pub const INHERITED_TEXT: Rgba = SLATE_900;
 
 /// 输入框聚焦光晕:`box-shadow: 0 0 0 3px rgba(255, 174, 0, 0.2)`(硬编码,非 token)
@@ -218,7 +216,7 @@ pub fn shadow_xl() -> Vec<BoxShadow> {
     ]
 }
 
-// 组件内硬编码阴影(SPEC 6.7 末段):
+// 组件内硬编码阴影:
 
 /// 主按钮常态 `0 1px 2px rgba(0,0,0,0.05)`
 pub fn shadow_primary_btn() -> Vec<BoxShadow> {
@@ -380,8 +378,7 @@ pub fn apply_to_gpui_component(cx: &mut gpui::App) {
     c.foreground = TEXT_PRIMARY.into();
     c.border = BORDER_DEFAULT.into();
     c.input = BORDER_DEFAULT.into();
-    // 源输入框聚焦边框为 var(--amber-500)(#f59e0b);光晕 rgba(255,174,0,0.2)
-    // 无法经组件复刻(见 KNOWN_DIFFERENCES),边框取 amber-500 保持像素一致
+    // 输入框聚焦边框取 amber-500(组件库无法复刻 3px 聚焦光晕)
     c.ring = AMBER_500.into();
     c.caret = AMBER_600.into();
     c.selection = AMBER_100.into();

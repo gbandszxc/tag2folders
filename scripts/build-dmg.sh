@@ -33,7 +33,7 @@ if [[ ! -x "$BIN" ]]; then echo "error: 二进制不存在或不可执行: $BIN"
 echo "==> 二进制: $BIN ($(file -b "$BIN" | cut -d, -f1-2))"
 
 # 2) 图标(优先用缓存 icns;否则从 assets/app-icon.png 生成)
-#    图标源 = 原项目 tag2folders(Tauri 版)docs/icon/raw.png 的副本,与重构前完全一致
+#    图标源 = assets/app-icon.png
 ICON_SRC="$repo_root/assets/app-icon.png"
 ICON_CACHE="$repo_root/assets/AppIcon.icns"
 build_icns() {
@@ -41,7 +41,7 @@ build_icns() {
     local iconset; iconset=$(mktemp -d)/AppIcon.iconset
     mkdir -p "$iconset"
     if python3 -c "import PIL" >/dev/null 2>&1; then
-        # PIL Lanczos 与原项目 scripts/generate_icons.py 同算法,产物与原项目 icns 像素级一致
+        # PIL Lanczos 重采样质量更好;无 PIL 时退回 sips
         python3 - "$ICON_SRC" "$iconset" <<'PY'
 import sys
 from PIL import Image

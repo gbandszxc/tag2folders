@@ -1,16 +1,8 @@
-//! 服务层：对应源项目 src-tauri/src/commands.rs（原 FastAPI 的 api/routes）。
+//! 服务层：UI 直接调用的纯函数接口（扫描/预览/整理/任务状态/目录浏览）。
 //!
-//! 与源的差异（去 Tauri 化）：
-//! - 去掉 `#[tauri::command]` / `tauri::AppHandle` / `tauri::Emitter` 包装，
-//!   改为普通函数，由 GPUI UI 层直接调用；
-//! - 错误类型从 `serde_json::Value`（字符串或对象）改为 `ServiceError` 枚举，
-//!   与源端 JSON 形状一一对应（`json!("...")` → `Message`、
-//!   `{"template_errors": [...]}` → `TemplateErrors`、
-//!   `{"preflight_errors": [...]}` → `PreflightErrors`），
-//!   错误文案逐字保留；
-//! - `exit_app` 命令不移植：GPUI 下由 UI 层 `cx.quit()` 承担。
-//!
-//! 函数签名/入参/返回结构遵循 docs/SOURCE_SPEC.md 第 5 章的类型契约。
+//! 错误统一为 [`ServiceError`] 枚举：纯字符串 `Message`、模板校验
+//! `TemplateErrors`、整理预检 `PreflightErrors`；数组类错误 `Display` 时
+//! 按 `\n` 连接多行展示。应用退出由 UI 层 `cx.quit()` 承担。
 
 use serde::Serialize;
 
@@ -19,16 +11,14 @@ use crate::task;
 
 // ── 错误类型 ─────────────────────────────────────────────────────────────────
 
-/// 服务层错误。变体与源项目 `serde_json::Value` 错误形状一一对应，
-/// 前端可见的错误文案（`Display`）与源项目完全一致：
-/// 数组类错误按前端 toError 规则以 `\n` 连接（见 SOURCE_SPEC 5.2）。
+/// 服务层错误。数组类错误的 `Display` 以 `\n` 连接（UI 多行展示）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServiceError {
-    /// 源端 `Err(json!(String))`：纯字符串错误
+    /// 纯字符串错误
     Message(String),
-    /// 源端 `Err(json!({ "template_errors": [...] }))`：模板校验错误
+    /// 模板校验错误（模板占位符不合法等）
     TemplateErrors(Vec<String>),
-    /// 源端 `Err(json!({ "preflight_errors": [...] }))`：整理预检错误
+    /// 整理预检错误（执行前整批拒绝）
     PreflightErrors(Vec<String>),
 }
 
@@ -36,7 +26,7 @@ impl std::fmt::Display for ServiceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ServiceError::Message(m) => write!(f, "{m}"),
-            // 前端 toError：arr.join('\n')
+            // 数组类错误按 '\n' 连接
             ServiceError::TemplateErrors(errs) => write!(f, "{}", errs.join("\n")),
             ServiceError::PreflightErrors(errs) => write!(f, "{}", errs.join("\n")),
         }
@@ -51,7 +41,7 @@ impl From<String> for ServiceError {
     }
 }
 
-// ── 扫描（原 POST /api/scan）────────────────────────────────────────────────
+// ── 扫描────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -80,7 +70,7 @@ pub fn scan_directory(
     })
 }
 
-// ── 预览（原 POST /api/preview）──────────────────────────────────────────────
+// ── 预览──────────────────────────────────────────────
 
 pub fn generate_preview(
     req: preview::PreviewRequest,
@@ -91,7 +81,7 @@ pub fn generate_preview(
     })
 }
 
-// ── 整理（原 POST /api/organize + SSE）──────────────────────────────────────
+// ── 整理──────────────────────────────────────
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -120,7 +110,7 @@ pub fn start_organize(
     let total = mappings.len();
     let task_id = task::create_task(total);
     let tid = task_id.clone();
-    // 源项目即用 std::thread::spawn（非 tauri::async_runtime），GPUI 版沿用
+    // 后台线程执行整理
     std::thread::spawn(move || {
         task::run_organize(tid, mappings, mode);
     });
@@ -128,7 +118,7 @@ pub fn start_organize(
     Ok(OrganizeStartResponse { task_id, total })
 }
 
-// ── 任务状态（原 GET /api/tasks/{id}/status）────────────────────────────────
+// ── 任务状态────────────────────────────────
 
 pub fn get_task_status(task_id: String) -> Result<task::ProgressEvent, ServiceError> {
     task::get_snapshot(&task_id).ok_or_else(|| {
@@ -136,7 +126,7 @@ pub fn get_task_status(task_id: String) -> Result<task::ProgressEvent, ServiceEr
     })
 }
 
-// ── 目录浏览（原 GET /api/browse，DirPicker 使用）───────────────────────────
+// ── 目录浏览（DirPicker 使用）───────────────────────────
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DirEntry {
@@ -186,7 +176,7 @@ pub fn browse_dirs(path: String) -> Result<BrowseResponse, ServiceError> {
         let mut items: Vec<_> = rd.filter_map(|e| e.ok()).collect();
         items.sort_by_key(|e| e.file_name());
         for item in items {
-            // 无权限项静默跳过（对齐 Python 端 PermissionError → pass）
+            // 无权限项静默跳过
             if let Ok(ft) = item.file_type() {
                 if ft.is_dir() {
                     entries.push(DirEntry {

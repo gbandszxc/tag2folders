@@ -1,6 +1,6 @@
-//! 进度条(SOURCE_SPEC 4.3.4):轨道 height 12、圆角 full、背景 slate-100;
+//! 进度条:轨道 height 12、圆角 full、背景 slate-100;
 //! 填充 amber-500、圆角 full。源实现用 `transform: scaleX(pct/100)` + 250ms 过渡,
-//! gpui 无 transform 过渡,直接按百分比宽度呈现(已知差异,见 KNOWN_DIFFERENCES)。
+//! gpui 无 transform 过渡,直接按百分比宽度呈现。
 
 #![allow(dead_code)]
 

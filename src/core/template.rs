@@ -1,5 +1,4 @@
 //! 模板渲染：`{album}/{track}. {title}.{ext}`（track 不足两位补零）。
-//! 移植自 backend/core/template.py。
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -33,7 +32,7 @@ fn unsafe_chars_re() -> &'static Regex {
     })
 }
 
-/// 校验模板。返回错误信息列表（空 = 合法）。错误文案需与 Python 端一致：
+/// 校验模板。返回错误信息列表（空 = 合法）。错误文案（测试锁定）：
 /// `Unsupported placeholder(s): ['album', ...].`
 pub fn validate_template(template: &str) -> Vec<String> {
     let mut errors: Vec<String> = Vec::new();
