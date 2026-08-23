@@ -1,6 +1,11 @@
 ## 项目规范
 
 1. 你可以通过 README.md 快速了解项目。涉及项目级别变更，请及时维护 README.md 及其引用到的相关文档。
+2. **设计系统规范（DESIGN.md）：**
+   - `DESIGN.md` 是项目视觉设计系统（The Amber Workbench）的唯一权威规范，与 `src/ui/theme.rs` 代码严格对齐。
+   - **严禁手写 Hex 色值**：所有前端/UI 颜色、圆角、阴影必须使用 `src/ui/theme.rs` 中定义的设计 Token。
+   - 涉及样式、组件规格、视觉 Token 或设计规则变更时，必须同步更新 `DESIGN.md` 以及机器可读伴生文件 `.impeccable/design.json`。
+   - 严格遵循单一暖色原则（琥珀 Amber 为唯一暖色焦点，slate 灰阶承载骨架，语义色 emerald/rose/sky 仅用于状态表达）。
 
 ## Git规范
 
