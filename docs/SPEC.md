@@ -203,7 +203,7 @@ pub struct ProgressEvent { task_id, status, current, total, current_file, messag
 - 预览页"开始执行整理" → `max_unlocked=3; current_step=3`（**无二次确认弹窗**，移动模式的防护 = 预览页静态警告条 + 进度页"准备开始"文案）。
 - "返回扫描" / "下一步" 直接切页，无解锁检查。
 - `reset`（重置确认 / "完成并开启新任务"，均不再二次确认）：回步骤 1、max_unlocked=1、三 token+1 丢弃在途请求、清 taskId（内存+持久化文件）、重建三页。
-- 键盘：⌘/Ctrl+1~3 切换步骤（尊重 max_unlocked）；**全部自绘交互控件 Tab 可聚焦 + Enter/Space 激活**（`track_focus` + `use_keyed_state` 按 id 持久化句柄，激活由 gpui 框架转发）；聚焦可见态 = Focus Ring 边框（按钮/芯片/分段）或悬浮同款底色（筛选胶囊/步骤条目/树行/浏览条目）。
+- 键盘：⌘/Ctrl+1~3 切换步骤（尊重 max_unlocked）；**全部自绘交互控件 Tab 可聚焦 + Enter/Space 激活**（`track_focus` + `use_keyed_state` 按 id 持久化句柄，激活由 gpui 框架转发）；聚焦可见态 = Focus Ring 边框（按钮/芯片/分段）或悬浮同款底色（筛选胶囊/步骤条目/树行/浏览条目）。PgUp/PgDn 对右工作区滚动容器整页翻页（`workspace_scroll` 句柄，视口高 ≈ 窗口高 − 顶栏 58，顶部/底部钳制；确认弹窗打开时忽略，无修饰键才生效）。
 
 ### 7.3 确认弹窗（全应用仅两处）
 

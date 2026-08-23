@@ -108,6 +108,9 @@ const TABLE_LIMIT: usize = 200;
 /// 表格体容器最大高度:表头固定行 + 表体容器内滚动(gpui 无 position:sticky)。
 const TABLE_BODY_MAX_H: Pixels = px(480.0);
 
+/// 顶栏高度(px);工作区 PgUp/PgDn 翻页视口 = 窗口高 − 顶栏。
+const HEADER_H: f32 = 58.0;
+
 // ── 预览页常量────────────────────────────────────
 
 /// 模板默认值 / 输入框占位文案(默认 `{album}/{track}. {title}.{ext}`，track 不足两位补零)。
@@ -480,6 +483,17 @@ fn log_is_at_bottom(handle: &ScrollHandle) -> bool {
     (handle.max_offset().height + handle.offset().y) < LOG_BOTTOM_ANCHOR
 }
 
+/// PgUp/PgDn 翻页后的工作区滚动 y:gpui 滚动约定向下为负(顶部 0、底部 -max),
+/// 步进 = 视口高度(整页),两端钳制;max ≤ 0(内容未溢出)恒为 0。
+fn paged_offset(current_y: f32, max: f32, viewport: f32, down: bool) -> f32 {
+    let raw = if down {
+        current_y - viewport
+    } else {
+        current_y + viewport
+    };
+    raw.clamp(-max.max(0.0), 0.0)
+}
+
 // ── 确认弹窗状态 ─────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -565,6 +579,8 @@ pub struct AppShell {
     confirm_focus: FocusHandle,
     /// 全局根容器焦点句柄(用于快捷键分发)
     pub focus_handle: FocusHandle,
+    /// 工作区滚动容器句柄(PgUp/PgDn 整页翻页)
+    workspace_scroll: ScrollHandle,
     /// 退出已确认(允许本次关窗)
     exit_confirmed: bool,
     /// 悬浮提示:鼠标悬停截断单元格时记录(文本 + 悬停时刻鼠标位置),离开清空。
@@ -593,6 +609,7 @@ impl AppShell {
             confirm: None,
             confirm_focus,
             focus_handle,
+            workspace_scroll: ScrollHandle::new(),
             exit_confirmed: false,
             hover_tip: None,
             scan_token: 0,
@@ -1248,7 +1265,7 @@ impl AppShell {
 
     fn render_header(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .h(px(58.0))
+            .h(px(HEADER_H))
             .flex()
             .flex_none()
             .items_center()
@@ -2949,12 +2966,32 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 键盘快捷键监听:支持 Cmd+1/2/3(macOS) 或 Ctrl+1/2/3(Windows/Linux) 切换向导步骤
-        let on_key_down = cx.listener(|this, event: &gpui::KeyDownEvent, _window, cx| {
-            let is_primary_mod =
-                event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
-            if is_primary_mod && !event.keystroke.modifiers.alt {
-                let target_step = match event.keystroke.key.as_str() {
+        // 键盘快捷键监听:PgUp/PgDn 工作区整页翻页;Cmd+1/2/3(macOS) 或
+        // Ctrl+1/2/3(Windows/Linux) 切换向导步骤。挂在根容器:焦点在根或
+        // 任意子控件时按键都会冒泡到这里。
+        let on_key_down = cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+            let ks = &event.keystroke;
+            // PgUp/PgDn:仅无修饰键时;确认弹窗打开时忽略(不翻动遮罩后的内容)
+            let plain = !ks.modifiers.platform
+                && !ks.modifiers.control
+                && !ks.modifiers.alt
+                && !ks.modifiers.shift;
+            if plain && this.confirm.is_none() && matches!(ks.key.as_str(), "pageup" | "pagedown") {
+                let down = ks.key == "pagedown";
+                let handle = this.workspace_scroll.clone();
+                let cur = f32::from(handle.offset().y);
+                // 视口高 ≈ 窗口高 − 顶栏(近似即可,两端钳制兜底)
+                let viewport = (f32::from(window.viewport_size().height) - HEADER_H).max(0.0);
+                let new_y = paged_offset(cur, f32::from(handle.max_offset().height), viewport, down);
+                if new_y != cur {
+                    handle.set_offset(gpui::point(px(0.0), px(new_y)));
+                    cx.notify();
+                }
+                return;
+            }
+            let is_primary_mod = ks.modifiers.platform || ks.modifiers.control;
+            if is_primary_mod && !ks.modifiers.alt {
+                let target_step = match ks.key.as_str() {
                     "1" => Some(1),
                     "2" => Some(2),
                     "3" => Some(3),
@@ -3002,6 +3039,7 @@ impl Render for AppShell {
                         // 右工作区:flex 1、纵向滚动、padding clamp(16,2.5vw,32) → 24
                         div()
                             .id("workspace-scroll")
+                            .track_scroll(&self.workspace_scroll)
                             .flex()
                             .flex_col()
                             .flex_1()
@@ -4010,6 +4048,21 @@ mod tests {
         assert_eq!(task_percent(Some(&ev(2, 3))), 67); // 66.67 → 67
         assert_eq!(task_percent(Some(&ev(3, 3))), 100);
         assert_eq!(task_percent(Some(&ev(5, 0))), 0);
+    }
+
+    /// PgUp/PgDn 翻页:整页步进、顶部/底部钳制、内容未溢出恒 0
+    #[test]
+    fn paged_offset_pages_and_clamps() {
+        // 视口 500、可滚 1200:顶部下翻 → -500 → -1000 → 钳到 -1200
+        assert_eq!(paged_offset(0.0, 1200.0, 500.0, true), -500.0);
+        assert_eq!(paged_offset(-500.0, 1200.0, 500.0, true), -1000.0);
+        assert_eq!(paged_offset(-1000.0, 1200.0, 500.0, true), -1200.0);
+        // 底部上翻 → -700;近顶上翻 → 钳到 0
+        assert_eq!(paged_offset(-1200.0, 1200.0, 500.0, false), -700.0);
+        assert_eq!(paged_offset(-300.0, 1200.0, 500.0, false), 0.0);
+        // 内容未溢出(max=0):两方向都恒 0
+        assert_eq!(paged_offset(0.0, 0.0, 500.0, true), 0.0);
+        assert_eq!(paged_offset(0.0, 0.0, 500.0, false), 0.0);
     }
 
     /// task_id 持久化往返 + 静默失败语义(缺文件/损坏内容 → 空串)
