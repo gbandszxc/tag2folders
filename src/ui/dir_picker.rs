@@ -316,7 +316,7 @@ pub fn render_dir_picker(
                         .text_color(theme::SLATE_400)
                         .cursor_pointer()
                         .hover(|st| st.text_color(theme::SLATE_600))
-                        .child(icon_sized(Icon::X, px(14.0)).text_color(theme::SLATE_400))
+                        .child(icon_sized(Icon::X, px(14.0)))
                         .on_click(move |_, window, cx| {
                             dp2.update(cx, |state, cx| state.clear(window, cx));
                         }),

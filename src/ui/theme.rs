@@ -383,7 +383,7 @@ pub fn apply_to_gpui_component(cx: &mut gpui::App) {
     c.caret = AMBER_600.into();
     c.selection = AMBER_100.into();
     c.muted = SLATE_100.into();
-    c.muted_foreground = SLATE_400.into();
+    c.muted_foreground = SLATE_500.into();
     c.popover = BG_SURFACE.into();
     c.popover_foreground = TEXT_PRIMARY.into();
     c.title_bar = BG_SURFACE.into();

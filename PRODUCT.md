@@ -4,7 +4,8 @@
 
 ## Platform
 
-desktop（原生桌面应用：Rust + GPUI；macOS arm64 / Windows x64。非 web/移动端，skill 的 ios/android 原生指引不适用）
+adaptive
+（原生桌面 macOS / Windows，GPUI 渲染。非 web/移动端，skill 的 ios/android 原生指引不适用）
 
 ## Users
 

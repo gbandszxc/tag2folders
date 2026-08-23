@@ -62,8 +62,6 @@ impl RenderOnce for StepNav {
         for (ix, step) in STEPS.iter().enumerate() {
             let done = step.num < self.current;
             let active = step.num == self.current;
-            let unlocked = step.num <= self.max_unlocked;
-            let _ = unlocked;
             col = col.child(self.render_step_item(step, done, active));
             if ix + 1 < steps {
                 // 步骤间连接线:marginLeft 30、h 24、w 2、色随解锁进度
@@ -83,7 +81,34 @@ impl RenderOnce for StepNav {
                 );
             }
         }
-        col
+
+        // 侧栏底部轻量快捷键提示(取代每个步骤条目挤占的小徽章)
+        let shortcut_text = if cfg!(target_os = "macos") {
+            "⌘ 1~3 快速切换步骤"
+        } else {
+            "Ctrl 1~3 快速切换步骤"
+        };
+        let tip = div()
+            .mt(px(24.0))
+            .pt(px(14.0))
+            .border_t_1()
+            .border_color(theme::BORDER_SUBTLE)
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(6.0))
+            .py(px(4.0))
+            .rounded(theme::RADIUS_SM)
+            .bg(theme::SLATE_50)
+            .child(
+                div()
+                    .text_size(px(11.0))
+                    .font_weight(gpui::FontWeight(500.0))
+                    .text_color(theme::SLATE_500)
+                    .child(shortcut_text),
+            );
+
+        col.child(tip)
     }
 }
 
@@ -140,7 +165,7 @@ impl StepNav {
                 .child("已完成")
                 .into_any_element()
         } else if unlocked {
-            icon_sized(Icon::ChevronRight, px(15.0))
+            icon_sized(Icon::ChevronRight, px(14.0))
                 .text_color(theme::SLATE_400)
                 .into_any_element()
         } else {
@@ -150,7 +175,6 @@ impl StepNav {
                 .child("未解锁")
                 .into_any_element()
         };
-
         let num = step.num;
         let on_click = &self.on_click;
 

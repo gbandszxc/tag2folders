@@ -526,16 +526,18 @@ pub struct AppShell {
     /// 待挂载的确认弹窗(单例:重置/退出)
     confirm: Option<PendingConfirm>,
     confirm_focus: FocusHandle,
+    /// 全局根容器焦点句柄(用于快捷键分发)
+    pub focus_handle: FocusHandle,
     /// 退出已确认(允许本次关窗)
     exit_confirmed: bool,
-
     _subs: Vec<Subscription>,
 }
 
 impl AppShell {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let confirm_focus = cx.focus_handle();
-
+        let focus_handle = cx.focus_handle();
+        focus_handle.focus(window);
         let mut shell = Self {
             current_step: 1,
             max_unlocked_step: 1,
@@ -551,6 +553,7 @@ impl AppShell {
             progress: ProgressPage::new(),
             confirm: None,
             confirm_focus,
+            focus_handle,
             exit_confirmed: false,
             scan_token: 0,
             preview_token: 0,
@@ -1105,7 +1108,6 @@ impl AppShell {
     /// 是否有进行中/未完成的整理任务。
     /// 判定:task_id 非空 且 快照未到终态(done/error);尚无快照(刚发起/
     /// 恢复后未轮到)视为进行中。终态任务不会因退出中断任何处理,不报"有任务"。
-
     fn has_running_task(&self) -> bool {
         if self.task_id.is_empty() {
             return false;
@@ -1787,10 +1789,14 @@ impl AppShell {
                     .whitespace_nowrap()
                     .cursor_pointer()
                     .when(selected, |el| {
-                        el.bg(theme::AMBER_500).text_color(theme::SLATE_800)
+                        el.bg(theme::AMBER_500)
+                            .text_color(theme::SLATE_800)
+                            .hover(|st| st.bg(theme::AMBER_600))
                     })
                     .when(!selected, |el| {
-                        el.bg(theme::SLATE_200).text_color(theme::SLATE_600)
+                        el.bg(theme::SLATE_200)
+                            .text_color(theme::SLATE_600)
+                            .hover(|st| st.bg(theme::SLATE_300).text_color(theme::SLATE_800))
                     })
                     .child(label)
                     .on_click(move |_, window, cx| on_field(&field, window, cx)),
@@ -1821,7 +1827,7 @@ impl AppShell {
                             .flex()
                             .items_center()
                             .child(
-                                icon_sized(Icon::Search, px(13.0)).text_color(theme::SLATE_400),
+                                icon_sized(Icon::Search, px(13.0)).text_color(theme::SLATE_500),
                             ),
                     ),
             )
@@ -1949,8 +1955,8 @@ impl AppShell {
                     .gap(px(8.0))
                     .px(px(16.0))
                     .py(px(40.0))
-                    .text_color(theme::SLATE_400)
-                    .child(icon_sized(Icon::Search, px(26.0)).text_color(theme::SLATE_300))
+                    .text_color(theme::SLATE_500)
+                    .child(icon_sized(Icon::Search, px(26.0)).text_color(theme::SLATE_400))
                     .child(
                         div()
                             .text_size(px(13.0))
@@ -1983,9 +1989,9 @@ impl AppShell {
                         .gap(px(6.0))
                         .px(px(20.0))
                         .py(px(10.0))
-                        .text_size(px(12.0))
-                        .text_color(theme::SLATE_500)
-                        .child(icon_sized(Icon::Info, px(13.0)).text_color(theme::SLATE_400))
+                        .text_size(px(12.5))
+                        .text_color(theme::SLATE_600)
+                        .child(icon_sized(Icon::Info, px(13.0)).text_color(theme::SLATE_500))
                         .child(format!(
                             "仅显示前 {TABLE_LIMIT} 条，共 {} 条。可使用筛选缩小范围。",
                             display.len()
@@ -2365,10 +2371,10 @@ impl AppShell {
                                 .gap(px(6.0))
                                 .px(px(20.0))
                                 .py(px(10.0))
-                                .text_size(px(12.0))
-                                .text_color(theme::SLATE_500)
+                                .text_size(px(12.5))
+                                .text_color(theme::SLATE_600)
                                 .child(
-                                    icon_sized(Icon::Info, px(13.0)).text_color(theme::SLATE_400),
+                                    icon_sized(Icon::Info, px(13.0)).text_color(theme::SLATE_500),
                                 )
                                 .child(format!(
                                     "仅显示前 {PREVIEW_TABLE_LIMIT} 条映射，共 {} 条。",
@@ -2477,7 +2483,14 @@ impl AppShell {
             this.preview.tree_toggled.clear();
             cx.notify();
         });
-
+        let show_tree_filter_clear = !filter_raw.is_empty();
+        let on_clear_tree_filter = cx.listener(|this, _e: &gpui::ClickEvent, window, cx| {
+            let tree_filter = this.preview.tree_filter.clone();
+            tree_filter.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+            });
+            cx.notify();
+        });
         // 主体:根层遍历(子目录对象键 + `__files__` 文件组;serde_json Map 为
         // BTreeMap,同层目录/文件按字典序排列)
         let tree = &self.preview.directory_tree;
@@ -2490,8 +2503,8 @@ impl AppShell {
                 .justify_center()
                 .gap(px(8.0))
                 .py(px(32.0))
-                .text_color(theme::SLATE_400)
-                .child(icon_sized(Icon::Folder, px(28.0)).text_color(theme::SLATE_300))
+                .text_color(theme::SLATE_500)
+                .child(icon_sized(Icon::Folder, px(28.0)).text_color(theme::SLATE_400))
                 .child(div().text_size(px(13.0)).child("暂无目录结构数据"))
                 .into_any_element()
         } else {
@@ -2556,7 +2569,7 @@ impl AppShell {
                             .items_center()
                             .gap(px(8.0))
                             // 过滤输入:w 140、h 28、fontSize 12、pl 24、
-                            // 左内嵌 SearchIcon 12 @ left 8
+                            // 左内嵌 SearchIcon 12 @ left 7，有内容时显示清空 X 按钮
                             .child(
                                 div()
                                     .relative()
@@ -2567,21 +2580,49 @@ impl AppShell {
                                             .py(px(0.0))
                                             .text_size(px(12.0))
                                             .pl(px(24.0))
-                                            .pr(px(8.0)),
+                                            .pr(if show_tree_filter_clear { px(22.0) } else { px(8.0) }),
                                     )
                                     .child(
                                         div()
                                             .absolute()
-                                            .left(px(8.0))
+                                            .left(px(7.0))
                                             .top(px(0.0))
                                             .bottom(px(0.0))
                                             .flex()
                                             .items_center()
                                             .child(
                                                 icon_sized(Icon::Search, px(12.0))
-                                                    .text_color(theme::SLATE_400),
+                                                    .text_color(theme::SLATE_500),
                                             ),
-                                    ),
+                                    )
+                                    .when(show_tree_filter_clear, |el| {
+                                        el.child(
+                                            div()
+                                                .absolute()
+                                                .right(px(4.0))
+                                                .top(px(0.0))
+                                                .bottom(px(0.0))
+                                                .flex()
+                                                .items_center()
+                                                .child(
+                                                    div()
+                                                        .id("tree-filter-clear")
+                                                        .p(px(2.0))
+                                                        .rounded(theme::RADIUS_XS)
+                                                        .cursor_pointer()
+                                                        .hover(|st| st.bg(theme::SLATE_200))
+                                                        .child(
+                                                            icon_sized(Icon::X, px(11.0))
+                                                                .text_color(theme::SLATE_500),
+                                                        )
+                                                        .on_click(
+                                                            move |e: &gpui::ClickEvent, window, cx| {
+                                                                on_clear_tree_filter(e, window, cx);
+                                                            },
+                                                        ),
+                                                ),
+                                        )
+                                    }),
                             )
                             .child(
                                 Button::new("tree-expand-toggle")
@@ -2590,9 +2631,17 @@ impl AppShell {
                                     } else {
                                         "全部展开"
                                     })
+                                    .icon(
+                                        if self.preview.tree_expand_all {
+                                            Icon::Folder
+                                        } else {
+                                            Icon::FolderOpen
+                                        },
+                                        px(12.0),
+                                    )
                                     .variant(ButtonVariant::Ghost)
                                     .size(ButtonSize::Sm)
-                                    .text_size(px(11.0))
+                                    .text_size(px(12.0))
                                     .pad_x(px(8.0))
                                     .pad_y(px(4.0))
                                     .on_click(on_expand_toggle),
@@ -2667,7 +2716,7 @@ impl AppShell {
                     if open { Icon::ChevronDown } else { Icon::ChevronRight },
                     px(14.0),
                 )
-                .text_color(theme::SLATE_400),
+                .text_color(theme::SLATE_500),
             )
             .child(
                 icon_sized(if open { Icon::FolderOpen } else { Icon::Folder }, px(16.0))
@@ -2677,7 +2726,7 @@ impl AppShell {
             .child(
                 div()
                     .text_size(px(11.0))
-                    .text_color(theme::SLATE_400)
+                    .text_color(theme::SLATE_500)
                     .ml(px(4.0))
                     .child(format!("({total_items})")),
             )
@@ -2708,9 +2757,28 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 键盘快捷键监听:支持 Cmd+1/2/3(macOS) 或 Ctrl+1/2/3(Windows/Linux) 切换向导步骤
+        let on_key_down = cx.listener(|this, event: &gpui::KeyDownEvent, _window, cx| {
+            let is_primary_mod =
+                event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
+            if is_primary_mod && !event.keystroke.modifiers.alt {
+                let target_step = match event.keystroke.key.as_str() {
+                    "1" => Some(1),
+                    "2" => Some(2),
+                    "3" => Some(3),
+                    _ => None,
+                };
+                if let Some(step) = target_step {
+                    this.go_to_step(step, cx);
+                }
+            }
+        });
+
         // 根容器:100vh、纵向 flex、bg-app
         let shell = div()
             .id("app-shell")
+            .track_focus(&self.focus_handle)
+            .on_key_down(on_key_down)
             .flex()
             .flex_col()
             .size_full()
@@ -3006,7 +3074,7 @@ fn placeholder_chip(
             theme::SLATE_200,
             theme::SLATE_50,
             theme::SLATE_700,
-            theme::SLATE_400,
+            theme::SLATE_500,
             theme::SLATE_500,
         )
     };
@@ -3450,6 +3518,7 @@ mod tests {
         assert_eq!(basename("plain.mp3"), "plain.mp3");
         assert_eq!(basename(""), "");
     }
+
 
     /// 筛选匹配:大小写不敏感子串;filename 字段只匹配 basename
     #[test]
