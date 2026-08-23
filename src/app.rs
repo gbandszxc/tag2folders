@@ -19,8 +19,9 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    Animation, AnimationExt, Context, DefiniteLength, Entity, FocusHandle, HighlightStyle, Pixels,
-    ScrollHandle, SharedString, StyledText, Subscription, Window, div, px,
+    Animation, AnimationExt, Context, DefiniteLength, ElementId, Entity, FocusHandle,
+    HighlightStyle, Pixels, ScrollHandle, SharedString, StyledText, Subscription, Window, deferred,
+    div, px,
 };
 
 use gpui_component::checkbox::Checkbox;
@@ -494,6 +495,22 @@ struct PendingConfirm {
     action: ConfirmAction,
 }
 
+// ── 悬浮提示(截断路径/文件名的完整内容)─────────────────────
+
+/// 悬浮提示回调:Some((文本, 是否 mono)) 记录提示,None 清除。
+/// Rc 包裹以便同一 listener 克隆进每个单元格的 on_hover 闭包。
+type TipCb = std::rc::Rc<dyn Fn(&Option<(String, bool)>, &mut Window, &mut gpui::App)>;
+
+/// 悬浮提示载荷:完整文本 + mono 标记 + 悬停时刻的鼠标窗口坐标。
+#[derive(Clone)]
+struct HoverTip {
+    text: String,
+    /// mono 展示(路径/文件名)还是 sans(其他)
+    mono: bool,
+    x: Pixels,
+    y: Pixels,
+}
+
 // ── 根实体 ───────────────────────────────────────────────────────────────────
 
 pub struct AppShell {
@@ -550,6 +567,8 @@ pub struct AppShell {
     pub focus_handle: FocusHandle,
     /// 退出已确认(允许本次关窗)
     exit_confirmed: bool,
+    /// 悬浮提示:鼠标悬停截断单元格时记录(文本 + 悬停时刻鼠标位置),离开清空。
+    hover_tip: Option<HoverTip>,
     _subs: Vec<Subscription>,
 }
 
@@ -575,6 +594,7 @@ impl AppShell {
             confirm_focus,
             focus_handle,
             exit_confirmed: false,
+            hover_tip: None,
             scan_token: 0,
             preview_token: 0,
             progress_token: 0,
@@ -666,6 +686,8 @@ impl AppShell {
     fn go_to_step(&mut self, step: usize, cx: &mut Context<Self>) {
         if step <= self.max_unlocked_step {
             self.current_step = step;
+            // 键盘切页时鼠标未移动,原单元格消失不触发 hover-end → 主动清悬浮提示
+            self.hover_tip = None;
             cx.notify();
         }
     }
@@ -806,6 +828,7 @@ impl AppShell {
         self.source_dir.clear();
         self.clear_organize_batch();
         self.task_id.clear();
+        self.hover_tip = None;
         // 源 handleReset → setTaskId('') → localStorage.removeItem
         clear_persisted_task_id();
         // 重建页面 = 源 resetKey 强制重挂载(内部状态与订阅全部丢弃重建)
@@ -1202,6 +1225,27 @@ impl AppShell {
     }
 
     // ── 渲染 ─────────────────────────────────────────────────────────────────
+
+    /// 悬浮提示采集回调(Rc 分发进各单元格 on_hover):Some((文本, mono)) →
+    /// 记录文本 + 当前鼠标窗口坐标;None → 清空。均触发重绘。
+    /// v1 不追踪鼠标移动——悬停期间任何 notify 重绘都按悬停时刻坐标重画。
+    fn tip_listener(&self, cx: &mut Context<Self>) -> TipCb {
+        std::rc::Rc::new(cx.listener(
+            |this, tip: &Option<(String, bool)>, window, cx| {
+                this.hover_tip = tip.as_ref().map(|(text, mono)| {
+                    let pos = window.mouse_position();
+                    HoverTip {
+                        text: text.clone(),
+                        mono: *mono,
+                        x: pos.x,
+                        y: pos.y,
+                    }
+                });
+                cx.notify();
+            },
+        ))
+    }
+
     fn render_header(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .h(px(58.0))
@@ -1340,6 +1384,8 @@ impl AppShell {
         let on_start = cx.listener(
             |this, _e: &gpui::ClickEvent, _window, cx| this.handle_progress_start(cx),
         );
+        // 悬浮提示采集(目标目录 chip / 正在处理文件名)
+        let on_tip = self.tip_listener(cx);
 
         // ── 4.3.2 任务概览卡片 ──
         let mode_badge_text = match mode {
@@ -1376,22 +1422,40 @@ impl AppShell {
                             .child(overview_label("目标目录"))
                             .child(
                                 // 等宽 chip:slate-100 底、padding 4 10、圆角 6、
-                                // 12.5 slate-700、truncate(title 悬浮提示为已知差异)
-                                div()
-                                    .font_family(theme::FONT_MONO)
-                                    .text_size(px(12.5))
-                                    .text_color(theme::SLATE_700)
-                                    .bg(theme::SLATE_100)
-                                    .px(px(10.0))
-                                    .py(px(4.0))
-                                    .rounded(theme::RADIUS_SM)
-                                    .max_w(gpui::relative(1.0))
-                                    .truncate()
-                                    .child(if target_dir.is_empty() {
-                                        "（未设置）".to_string()
-                                    } else {
-                                        target_dir.clone()
-                                    }),
+                                // 12.5 slate-700、truncate;悬停浮层提示完整 target_dir
+                                {
+                                    let on_dir_tip = on_tip.clone();
+                                    let tip_text = target_dir.clone();
+                                    div()
+                                        .id("progress-tip-target-dir")
+                                        .font_family(theme::FONT_MONO)
+                                        .text_size(px(12.5))
+                                        .text_color(theme::SLATE_700)
+                                        .bg(theme::SLATE_100)
+                                        .px(px(10.0))
+                                        .py(px(4.0))
+                                        .rounded(theme::RADIUS_SM)
+                                        .max_w(gpui::relative(1.0))
+                                        .truncate()
+                                        .child(if target_dir.is_empty() {
+                                            "（未设置）".to_string()
+                                        } else {
+                                            target_dir.clone()
+                                        })
+                                        // 空目录提示无意义,仅在非空时挂 on_hover
+                                        .when(!target_dir.is_empty(), |el| {
+                                            el.on_hover(
+                                                move |hovered: &bool, window, cx| {
+                                                    on_dir_tip(
+                                                        &hovered
+                                                            .then(|| (tip_text.clone(), true)),
+                                                        window,
+                                                        cx,
+                                                    )
+                                                },
+                                            )
+                                        })
+                                },
                             ),
                     )
                     .child(
@@ -1565,16 +1629,29 @@ impl AppShell {
                         .child(
                             icon_sized(Icon::FileAudio, px(14.0)).text_color(theme::AMBER_600),
                         )
-                        .child(
+                        .child({
+                            // truncate 文件名;悬停浮层提示完整 current_file 路径
+                            let on_file_tip = on_tip.clone();
+                            let tip_text = current_file.clone();
                             div()
+                                .id("progress-tip-current-file")
                                 .flex_1()
                                 .min_w(px(0.0))
                                 .font_family(theme::FONT_MONO)
                                 .text_size(px(12.0))
                                 .text_color(theme::AMBER_900)
                                 .truncate()
-                                .child(current_file),
-                        ),
+                                .child(current_file)
+                                .on_hover(
+                                    move |hovered: &bool, window, cx| {
+                                        on_file_tip(
+                                            &hovered.then(|| (tip_text.clone(), true)),
+                                            window,
+                                            cx,
+                                        )
+                                    },
+                                )
+                        }),
                 );
             }
             page = page.child(running);
@@ -1777,6 +1854,8 @@ impl AppShell {
         let on_next = cx.listener(
             |this, _e: &gpui::ClickEvent, window, cx| this.handle_next(window, cx),
         );
+        // 悬浮提示采集(表格文件名列)
+        let on_tip = self.tip_listener(cx);
 
         // 筛选栏:前缀文字 + 字段胶囊(单选) + 关键词输入 + 清空
         let mut filter_bar = div()
@@ -2011,7 +2090,7 @@ impl AppShell {
                     )
                     .into_any_element()
             } else {
-                render_scan_table(display).into_any_element()
+                render_scan_table(display, on_tip.clone()).into_any_element()
             };
 
             let mut stats_card = card()
@@ -2134,6 +2213,8 @@ impl AppShell {
             this.preview.active_tab = PreviewTab::Tree;
             cx.notify();
         });
+        // 悬浮提示采集(映射表源文件/目标路径单元格)
+        let on_tip = self.tip_listener(cx);
 
         // ── 4.2.2-2 命名模板:输入框 + 占位符芯片行 ──
         let mut chips_row = div()
@@ -2413,7 +2494,7 @@ impl AppShell {
                     let mut table_card = card()
                         .padding(CardPadding::None)
                         .map(|el| el.mt(px(12.0)))
-                        .child(render_mapping_table(mappings));
+                        .child(render_mapping_table(mappings, on_tip.clone()));
                     if mappings.len() > PREVIEW_TABLE_LIMIT {
                         table_card = table_card.child(
                             div()
@@ -2531,6 +2612,8 @@ impl AppShell {
     ) -> impl IntoElement {
         let filter_raw = self.preview.tree_filter.read(cx).value().to_string();
         let filter_lower = filter_raw.to_lowercase();
+        // 悬浮提示采集(文件行)
+        let on_tip = self.tip_listener(cx);
 
         // "全部折叠"/"全部展开"三态切换:当前为全部展开 → 切到全部收起;
         // 否则(默认/已收起)→ 全部展开。切换并清空用户开合记录
@@ -2581,7 +2664,13 @@ impl AppShell {
                 for (k, v) in obj {
                     if k == TREE_SENTINEL {
                         let files = tree_files_of(v);
-                        rows = rows.child(render_tree_files(&files, 0, &filter_lower));
+                        rows = rows.child(render_tree_files(
+                            &files,
+                            0,
+                            &filter_lower,
+                            "root",
+                            on_tip.clone(),
+                        ));
                     } else {
                         rows = rows.child(self.render_tree_node(
                             &format!("root/{k}"),
@@ -2589,6 +2678,7 @@ impl AppShell {
                             v,
                             0,
                             &filter_lower,
+                            &on_tip,
                             window,
                             cx,
                         ));
@@ -2752,6 +2842,7 @@ impl AppShell {
         node: &serde_json::Value,
         depth: usize,
         filter_lower: &str,
+        on_tip: &TipCb,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
@@ -2836,12 +2927,19 @@ impl AppShell {
                     v,
                     depth + 1,
                     filter_lower,
+                    on_tip,
                     window,
                     cx,
                 ));
             }
             if !files.is_empty() {
-                children = children.child(render_tree_files(&files, depth, filter_lower));
+                children = children.child(render_tree_files(
+                    &files,
+                    depth,
+                    filter_lower,
+                    &path_key,
+                    on_tip.clone(),
+                ));
             }
             node_el = node_el.child(children);
         }
@@ -2936,7 +3034,17 @@ impl Render for AppShell {
             None => div().into_any_element(),
         };
 
-        div().relative().size_full().overflow_hidden().child(shell).child(confirm_el)
+        div()
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .child(shell)
+            .child(confirm_el)
+            // 悬浮提示浮层(最后追加:deferred 盖在常规内容之上;
+            // 模态遮罩打开时其下的单元格不会进入 hover,互不冲突)
+            .when_some(self.hover_tip.clone(), |el, tip| {
+                el.child(render_hover_tip(&tip))
+            })
     }
 }
 
@@ -2999,10 +3107,40 @@ fn scan_text_cell(width: f32, text: &str) -> gpui::Div {
         .child(div().truncate().child(text.to_string()))
 }
 
+/// 带 hover 提示的正文单元格:内容 truncate + on_hover——
+/// 悬停回传 (完整文本, mono=true),离开回传 None(写入 AppShell.hover_tip,
+/// 由根容器 deferred 浮层展示完整内容)。
+/// on_hover 需 Stateful 元素:id 挂在内容 div 上,由调用方传入保证全局唯一
+/// (hover 状态按元素 id 存储)。
+fn scan_text_cell_tip(
+    id: impl Into<ElementId>,
+    width: f32,
+    text: &str,
+    full: String,
+    on_tip: TipCb,
+) -> gpui::Div {
+    div()
+        .w(DefiniteLength::Fraction(width))
+        .px(px(12.0))
+        .py(px(9.0))
+        .text_size(px(12.5))
+        .text_color(theme::SLATE_700)
+        .child(
+            div()
+                .id(id)
+                .truncate()
+                .child(text.to_string())
+                .on_hover(move |hovered: &bool, window, cx| {
+                    on_tip(&hovered.then(|| (full.clone(), true)), window, cx)
+                }),
+        )
+}
+
 /// 文件表格:外层水平滚动(表 minWidth 560)、固定表头、
 /// 表体容器内垂直滚动(≤200 行直接构建,不虚拟化);行 hover 底色 slate-50、
-/// 无斑马纹/无选中态;状态列 StatusBadge sm(ok/unreadable)。
-fn render_scan_table(display: &[AudioMetadata]) -> impl IntoElement {
+/// 无斑马纹/无选中态;状态列 StatusBadge sm(ok/unreadable);
+/// 文件名列 truncate,悬停浮层提示完整 `f.path`。
+fn render_scan_table(display: &[AudioMetadata], on_tip: TipCb) -> impl IntoElement {
     let header = div()
         .flex()
         .bg(theme::SLATE_50)
@@ -3031,7 +3169,13 @@ fn render_scan_table(display: &[AudioMetadata]) -> impl IntoElement {
             .when(ix + 1 < shown_count, |el| {
                 el.border_b_1().border_color(theme::SLATE_100)
             })
-            .child(scan_text_cell(SCAN_TABLE_COLS[0].1, basename(&f.path)))
+            .child(scan_text_cell_tip(
+                SharedString::from(format!("scan-tip-{ix}")),
+                SCAN_TABLE_COLS[0].1,
+                basename(&f.path),
+                f.path.clone(),
+                on_tip.clone(),
+            ))
             .child(scan_text_cell(SCAN_TABLE_COLS[1].1, &f.artist))
             .child(scan_text_cell(SCAN_TABLE_COLS[2].1, &f.album))
             .child(scan_text_cell(SCAN_TABLE_COLS[3].1, &f.title))
@@ -3073,6 +3217,35 @@ fn overview_label(text: &str) -> gpui::Div {
         .text_color(theme::SLATE_500)
         .mb(px(4.0))
         .child(text.to_string())
+}
+
+// ── 悬浮提示渲染 ─────────────────────────────────────────────────────────────
+
+/// 悬浮提示浮层:deferred 盖在一切常规内容之上,绝对定位于悬停鼠标右下
+/// (+14/+18,坐标为悬停时刻窗口坐标);深底 slate-950(延续日志控制台的
+/// 深底语言)+ slate-100 文字、padding 10 5、圆角 sm、阴影 md、12/1.5;
+/// mono 提示用等宽字体(Mono-Truth);长文本在 max_w 560 内自动换行。
+/// v1 已知边界:不做窗口左/上(及右缘)越界钳制——近窗口右/下缘时浮层
+/// 可能被根容器 overflow_hidden 裁剪;也不追踪鼠标移动,任何 notify
+/// 重绘都按悬停时刻坐标重画同一位置。
+fn render_hover_tip(tip: &HoverTip) -> impl IntoElement {
+    deferred(
+        div()
+            .absolute()
+            .left(tip.x + px(14.0))
+            .top(tip.y + px(18.0))
+            .max_w(px(560.0))
+            .px(px(10.0))
+            .py(px(5.0))
+            .bg(theme::SLATE_950)
+            .text_color(theme::SLATE_100)
+            .text_size(px(12.0))
+            .line_height(gpui::relative(1.5))
+            .rounded(theme::RADIUS_SM)
+            .shadow(theme::shadow_md())
+            .when(tip.mono, |el| el.font_family(theme::FONT_MONO))
+            .child(tip.text.clone()),
+    )
 }
 
 /// 日志行:`[n/total]` 前缀琥珀 amber-400 #ffc533、
@@ -3347,8 +3520,9 @@ const PREVIEW_TABLE_COLS: [(&str, f32); 3] = [("源文件", 0.38), ("目标路�
 /// 路径)46% / 最终状态(StatusBadge sm)16%;表 minWidth 560 + 外层水平滚动、
 /// 固定表头 + 表体容器内滚动(同扫描页);行 hover 底色
 /// slate-50、无斑马纹;**冲突行无特殊底色**(以 amber 徽章表达,源行为);
-/// 行不可点击。最多渲染 300 行(截断提示由调用方追加)。
-fn render_mapping_table(mappings: &[FileMappingItem]) -> impl IntoElement {
+/// 行不可点击。源/目标单元格 truncate,悬停浮层分别提示完整
+/// `source` / `final_target` 路径。最多渲染 300 行(截断提示由调用方追加)。
+fn render_mapping_table(mappings: &[FileMappingItem], on_tip: TipCb) -> impl IntoElement {
     let header = div()
         .flex()
         .bg(theme::SLATE_50)
@@ -3374,8 +3548,21 @@ fn render_mapping_table(mappings: &[FileMappingItem]) -> impl IntoElement {
             .when(ix + 1 < shown_count, |el| {
                 el.border_b_1().border_color(theme::SLATE_100)
             })
-            .child(scan_text_cell(PREVIEW_TABLE_COLS[0].1, basename(&m.source)))
-            .child(scan_text_cell(PREVIEW_TABLE_COLS[1].1, &m.final_target))
+            // 源文件单元格提示完整 source 路径;目标路径单元格提示完整 final_target
+            .child(scan_text_cell_tip(
+                SharedString::from(format!("preview-tip-src-{ix}")),
+                PREVIEW_TABLE_COLS[0].1,
+                basename(&m.source),
+                m.source.clone(),
+                on_tip.clone(),
+            ))
+            .child(scan_text_cell_tip(
+                SharedString::from(format!("preview-tip-dst-{ix}")),
+                PREVIEW_TABLE_COLS[1].1,
+                &m.final_target,
+                m.final_target.clone(),
+                on_tip.clone(),
+            ))
             .child(
                 div()
                     .w(DefiniteLength::Fraction(PREVIEW_TABLE_COLS[2].1))
@@ -3405,8 +3592,16 @@ fn tree_files_of(v: &serde_json::Value) -> Vec<String> {
 
 /// 文件行组(`__files__` 叶子):FileAudioIcon 14 amber-600 +
 /// 等宽文件名 12.5 slate-700、truncate、hover slate-100;缩进 (depth+1)*20+8;
-/// **整组无过滤匹配则不渲染**(目录节点不过滤,仅文件)。
-fn render_tree_files(files: &[String], depth: usize, filter_lower: &str) -> gpui::Div {
+/// 文件名 truncate,悬停浮层提示完整文件名(行内容即文件名,无路径前缀);
+/// 行 id 以 `parent_key/{file}` 构造保证全局唯一(同名文件分属不同目录时
+/// hover 状态不串扰);**整组无过滤匹配则不渲染**(目录节点不过滤,仅文件)。
+fn render_tree_files(
+    files: &[String],
+    depth: usize,
+    filter_lower: &str,
+    parent_key: &str,
+    on_tip: TipCb,
+) -> gpui::Div {
     let mut col = div().flex().flex_col();
     let mut any = false;
     for file in files {
@@ -3414,6 +3609,9 @@ fn render_tree_files(files: &[String], depth: usize, filter_lower: &str) -> gpui
             continue;
         }
         any = true;
+        let on_row_tip = on_tip.clone();
+        let tip_text = file.clone();
+        let row_id = SharedString::from(format!("tree-file-{parent_key}/{file}"));
         col = col.child(
             div()
                 .flex()
@@ -3428,7 +3626,21 @@ fn render_tree_files(files: &[String], depth: usize, filter_lower: &str) -> gpui
                 .rounded(theme::RADIUS_XS)
                 .hover(|st| st.bg(theme::SLATE_100))
                 .child(icon_sized(Icon::FileAudio, px(14.0)).text_color(theme::AMBER_600))
-                .child(div().flex_1().min_w(px(0.0)).truncate().child(file.clone())),
+                .child(
+                    div()
+                        .id(row_id)
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .truncate()
+                        .child(file.clone())
+                        .on_hover(move |hovered: &bool, window, cx| {
+                            on_row_tip(
+                                &hovered.then(|| (tip_text.clone(), true)),
+                                window,
+                                cx,
+                            )
+                        }),
+                ),
         );
     }
     if any {
