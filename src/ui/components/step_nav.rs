@@ -55,14 +55,14 @@ impl StepNav {
 }
 
 impl RenderOnce for StepNav {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         // aside:宽 clamp(210,22vw,250) → 用弹性近似 22vw:固定 230px 中值 + min/max
         let mut col = div().flex().flex_col().gap(px(2.0));
         let steps = STEPS.len();
         for (ix, step) in STEPS.iter().enumerate() {
             let done = step.num < self.current;
             let active = step.num == self.current;
-            col = col.child(self.render_step_item(step, done, active));
+            col = col.child(self.render_step_item(step, done, active, window, cx));
             if ix + 1 < steps {
                 // 步骤间连接线:marginLeft 30、h 24、w 2、色随解锁进度
                 let connector_color = if step.num < self.max_unlocked {
@@ -113,9 +113,27 @@ impl RenderOnce for StepNav {
 }
 
 impl StepNav {
-    fn render_step_item(&self, step: &StepDef, done: bool, active: bool) -> impl IntoElement {
+    /// 键盘可达:已解锁步骤条目 track_focus(Tab 聚焦 + Enter/Space 激活由框架
+    /// 提供);⌘/Ctrl+1~3 是等价快捷路径。聚焦可见 = 悬浮底色。
+    fn render_step_item(
+        &self,
+        step: &StepDef,
+        done: bool,
+        active: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> impl IntoElement {
         let unlocked = step.num <= self.max_unlocked;
         let dimmed = !unlocked;
+
+        // 键盘焦点句柄(按元素 id 持久化的 window 级 keyed state)
+        let focus_handle = window
+            .use_keyed_state(SharedString::from(format!("step-{}", step.num)), cx, |_, cx| {
+                cx.focus_handle()
+            })
+            .read(cx)
+            .clone();
+        let focused = unlocked && focus_handle.is_focused(window);
 
         // 38×38 图标瓦片分态
         let (tile_bg, tile_fg, show_check) = if done {
@@ -194,6 +212,11 @@ impl StepNav {
                 el.cursor_pointer().hover(|st| st.bg(theme::SLATE_50))
             })
             .when(!unlocked, |el| el.cursor_default())
+            // Tab 可聚焦(仅已解锁);聚焦可见 = 悬浮同款底色,Enter/Space 框架转发 click
+            .when(unlocked, |el| {
+                el.track_focus(&focus_handle)
+                    .when(focused, |el| el.bg(theme::SLATE_50))
+            })
             .child(
                 div()
                     .size(px(38.0))
