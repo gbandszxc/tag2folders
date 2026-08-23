@@ -165,6 +165,18 @@ pub enum PreviewTab {
     Tree,
 }
 
+/// 目录树展开模式:Default=默认展开 depth<2;ExpandAll=全部展开;CollapseAll=全部收起。
+/// (源 expandAll 布尔二态不足以表达"默认只展开前两层",三态让"全部展开"名副其实)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TreeExpandMode {
+    /// 默认:仅展开 0、1 层(TREE_INITIAL_EXPANDED_DEPTH)
+    Default,
+    /// 全部展开(任意深度)
+    ExpandAll,
+    /// 全部收起
+    CollapseAll,
+}
+
 /// 步骤 1:扫描文件。页面为普通 struct(状态挂在 AppShell 上),
 /// 高交互控件(DirPicker/筛选输入)持有独立 Entity。
 pub struct ScanPage {
@@ -204,19 +216,21 @@ impl ScanPage {
         }
     }
 
-    /// 筛选结果:关键词 trim 后为空 → 原样返回;否则按当前字段做大小写不敏感
-    /// 子串匹配。
-    fn filtered_files(&self, cx: &gpui::App) -> Vec<AudioMetadata> {
+    /// 筛选结果:关键词 trim 后为空 → 借用原表返回(Cow::Borrowed,render 每帧
+    /// 无条件调用也不触发全量深拷贝——万级文件时每个筛选键击一次深拷贝不可接受);
+    /// 否则按当前字段做大小写不敏感子串匹配,返回 Owned 子集。
+    fn filtered_files(&self, cx: &gpui::App) -> std::borrow::Cow<'_, [AudioMetadata]> {
         let kw_raw = self.filter_input.read(cx).value();
         let kw = kw_raw.trim().to_lowercase();
         if kw.is_empty() {
-            return self.files.clone();
+            return std::borrow::Cow::Borrowed(self.files.as_slice());
         }
         self.files
             .iter()
             .filter(|f| matches_filter(self.filter_field, &kw, f))
             .cloned()
-            .collect()
+            .collect::<Vec<_>>()
+            .into()
     }
 }
 
@@ -242,8 +256,9 @@ pub struct PreviewPage {
     pub active_tab: PreviewTab,
     /// 目录树过滤输入
     pub tree_filter: Entity<InputState>,
-    /// 目录树全部展开开关(源 expandAll;翻转 = 源 key 变更强制重挂载、重置全部开合)
-    pub tree_expand_all: bool,
+    /// 目录树展开模式(源 expandAll 布尔的三态化;切换时清空 tree_toggled,
+    /// 各节点回到新模式的默认开合)
+    pub tree_expand_mode: TreeExpandMode,
     /// 被用户手动切换过开合的树节点(与默认开合相反;expandAll 翻转时清空)
     pub tree_toggled: HashSet<String>,
     // ── 表单值镜像:React useEffect 依赖数组"同值不触发 effect"的等价实现 ──
@@ -277,7 +292,7 @@ impl PreviewPage {
             resolved_target_dir: String::new(),
             active_tab: PreviewTab::List,
             tree_filter,
-            tree_expand_all: true,
+            tree_expand_mode: TreeExpandMode::Default,
             tree_toggled: HashSet::new(),
             form_template: DEFAULT_TEMPLATE.to_string(),
             form_target_dir: String::new(),
@@ -298,10 +313,15 @@ fn is_organizable(m: &FileMappingItem) -> bool {
     )
 }
 
-/// 树节点默认开合(默认展开 0、1 层);用户手动切换过的节点取反,
-/// expandAll 翻转后重置。
-fn tree_node_open(expand_all: bool, user_toggled: bool, depth: usize) -> bool {
-    let default_open = expand_all && depth < TREE_INITIAL_EXPANDED_DEPTH;
+/// 树节点默认开合(见 [`TreeExpandMode`]):Default 展开 0、1 层,
+/// ExpandAll 全开,CollapseAll 全关;用户手动切换过的节点取反默认
+/// (模式切换时 tree_toggled 由调用方清空重置)。
+fn tree_node_open(mode: TreeExpandMode, user_toggled: bool, depth: usize) -> bool {
+    let default_open = match mode {
+        TreeExpandMode::Default => depth < TREE_INITIAL_EXPANDED_DEPTH,
+        TreeExpandMode::ExpandAll => true,
+        TreeExpandMode::CollapseAll => false,
+    };
     if user_toggled {
         !default_open
     } else {
@@ -760,7 +780,8 @@ impl AppShell {
     fn handle_next(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let keyword = self.scan.filter_input.read(cx).value().to_string();
         if !keyword.trim().is_empty() {
-            let filtered = self.scan.filtered_files(cx);
+            // 提交筛选子集需要 Vec 所有权;单次点击深拷贝一次可接受
+            let filtered = self.scan.filtered_files(cx).into_owned();
             let source_dir = self.scan.dir.read(cx).value(cx);
             self.handle_scan_complete(filtered, source_dir, window, cx);
         }
@@ -1240,13 +1261,14 @@ impl AppShell {
                     .flex_none()
                     .items_center()
                     .gap(px(10.0))
-                    // 版本徽章:badge-amber + padding 4px 10px + fontSize 11.5
+                    // 版本徽章:badge-amber + padding 4px 10px + fontSize 11.5;
+                    // 版本号编译期取自 Cargo.toml(单一来源,避免手写漂移)
                     .child(
                         badge(BadgeVariant::Amber)
                             .px(px(10.0))
                             .py(px(4.0))
                             .text_size(px(11.5))
-                            .child("v2.0.1"),
+                            .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
                     )
                     // 重置按钮:ghost sm + RefreshIcon 14(title 提示见已知差异)
                     .child(
@@ -1307,7 +1329,8 @@ impl AppShell {
                 .child(
                     div()
                         .text_size(px(13.0))
-                        .text_color(theme::AMBER_800)
+                        // amber-900:13px 小字在 amber-50 底对比度达标
+                        .text_color(theme::AMBER_900)
                         .child("没有待处理的文件，请先完成扫描和预览步骤。"),
                 )
                 .into_any_element();
@@ -1424,7 +1447,8 @@ impl AppShell {
                                 range,
                                 HighlightStyle {
                                     font_weight: Some(gpui::FontWeight(700.0)),
-                                    color: Some(theme::AMBER_800.into()),
+                                    // amber-900:13.5px 加粗计数未达大文本阈值,仍需 4.5:1
+                                    color: Some(theme::AMBER_900.into()),
                                     ..Default::default()
                                 },
                             )]),
@@ -1534,7 +1558,8 @@ impl AppShell {
                                 .flex_none()
                                 .text_size(px(11.5))
                                 .font_weight(gpui::FontWeight(600.0))
-                                .text_color(theme::AMBER_800)
+                                // amber-900:11.5px 小字在 amber-50 底对比度达标
+                                .text_color(theme::AMBER_900)
                                 .child("正在处理"),
                         )
                         .child(
@@ -1939,8 +1964,9 @@ impl AppShell {
                     ))
                 });
 
-            // 表格区:无匹配空态 / 表格 + 截断提示
-            let display: &Vec<AudioMetadata> = if filter_active {
+            // 表格区:无匹配空态 / 表格 + 截断提示。
+            // 空关键词时 filtered 为 Borrowed(借用原表),此处统一按切片使用
+            let display: &[AudioMetadata] = if filter_active {
                 &filtered
             } else {
                 &self.scan.files
@@ -2217,7 +2243,8 @@ impl AppShell {
                     div()
                         .flex_1()
                         .text_size(px(13.0))
-                        .text_color(theme::AMBER_800)
+                        // amber-900:13px 小字在 amber-50 底对比度达标
+                        .text_color(theme::AMBER_900)
                         .child("尚未扫描任何文件，请先完成扫描步骤。"),
                 )
                 .child(
@@ -2476,10 +2503,16 @@ impl AppShell {
         let filter_raw = self.preview.tree_filter.read(cx).value().to_string();
         let filter_lower = filter_raw.to_lowercase();
 
-        // "全部折叠"/"全部展开"切换:翻转 expandAll 并清空用户开合记录
-        // (各节点回到默认开合)
+        // "全部折叠"/"全部展开"三态切换:当前为全部展开 → 切到全部收起;
+        // 否则(默认/已收起)→ 全部展开。切换并清空用户开合记录
+        // (各节点回到新模式的默认开合)
         let on_expand_toggle = cx.listener(|this, _e: &gpui::ClickEvent, _window, cx| {
-            this.preview.tree_expand_all = !this.preview.tree_expand_all;
+            this.preview.tree_expand_mode =
+                if this.preview.tree_expand_mode == TreeExpandMode::ExpandAll {
+                    TreeExpandMode::CollapseAll
+                } else {
+                    TreeExpandMode::ExpandAll
+                };
             this.preview.tree_toggled.clear();
             cx.notify();
         });
@@ -2626,13 +2659,19 @@ impl AppShell {
                             )
                             .child(
                                 Button::new("tree-expand-toggle")
-                                    .label(if self.preview.tree_expand_all {
+                                    // 三态下仅区分"当前已全部展开"(可折叠)与
+                                    // 其余(默认/已收起,可展开)
+                                    .label(if self.preview.tree_expand_mode
+                                        == TreeExpandMode::ExpandAll
+                                    {
                                         "全部折叠"
                                     } else {
                                         "全部展开"
                                     })
                                     .icon(
-                                        if self.preview.tree_expand_all {
+                                        if self.preview.tree_expand_mode
+                                            == TreeExpandMode::ExpandAll
+                                        {
                                             Icon::Folder
                                         } else {
                                             Icon::FolderOpen
@@ -2683,7 +2722,7 @@ impl AppShell {
         let total_items = files.len() + subdirs.len();
 
         let user_toggled = self.preview.tree_toggled.contains(&path_key);
-        let open = tree_node_open(self.preview.tree_expand_all, user_toggled, depth);
+        let open = tree_node_open(self.preview.tree_expand_mode, user_toggled, depth);
 
         // 点击行 → 切换开合(记录与默认相反的节点)
         let toggle_key = path_key.clone();
@@ -2995,7 +3034,8 @@ fn render_log_line(ix: usize, line: &str) -> gpui::Stateful<gpui::Div> {
 }
 
 /// 分段控件按钮:
-/// 激活 = weight 600 + amber-800 + 白底 + 圆角 6 + shadow-xs;
+/// 激活 = weight 600 + amber-900(小字 13px 在白底需 ≥4.5:1,amber-800 仅 ~4.1)+
+/// 白底 + 圆角 6 + shadow-xs;
 /// 未激活 = weight 500 + slate-600 + 透明底。可选计数徽章(list Tab)。
 fn segment_btn(
     id: &str,
@@ -3024,7 +3064,8 @@ fn segment_btn(
     if active {
         btn = btn
             .bg(theme::BG_SURFACE)
-            .text_color(theme::AMBER_800)
+            // amber-900:13px 小字在白底对比度达标(amber-800 仅 ~4.1:1)
+            .text_color(theme::AMBER_900)
             .shadow(theme::shadow_xs());
     } else {
         btn = btn.text_color(theme::SLATE_600);
@@ -3050,8 +3091,9 @@ fn segment_btn(
 }
 
 /// 占位符芯片:TagIcon 12 + 等宽 tag(weight 600)+
-/// 中文小标 11(常态 slate-500 / 悬浮 amber-800);悬浮 = amber-400 边框 +
-/// amber-100 底 + 深色文字(#0f172a)。
+/// 中文小标 11(常态 slate-500 / 悬浮 amber-900,小字对比度达标)+
+/// 悬浮图标 amber-800(amber-700 on amber-100 仅 2.86:1,图标需 ≥3:1);
+/// 悬浮 = amber-400 边框 + amber-100 底 + 深色文字(#0f172a)。
 /// hover 逐子元素变色在 gpui 需页面持有 hover 状态(on_hover 上提实现)。
 fn placeholder_chip(
     ix: usize,
@@ -3066,8 +3108,9 @@ fn placeholder_chip(
             theme::AMBER_400,
             theme::AMBER_100,
             theme::INHERITED_TEXT,
-            theme::AMBER_700,
+            // 图标 ≥3:1(amber-700 on amber-100 仅 2.86);小标文字用 amber-900 达标
             theme::AMBER_800,
+            theme::AMBER_900,
         )
     } else {
         (
@@ -3111,7 +3154,8 @@ fn placeholder_chip(
 }
 
 /// 移动模式警告条:amber-50 底 / amber-200 边框、圆角 8、
-/// padding 10 14;AlertTriangle 16 amber-600;文字 12.5 amber-800、行高 1.6,
+/// padding 10 14;AlertTriangle 16 amber-600;文字 12.5 amber-900(小字
+/// 对比度达标,amber-800 仅 ~3.9)、行高 1.6,
 /// "移动模式不可逆："加粗(StyledText 高亮,等价源 `<strong>`)。
 fn move_mode_warning() -> gpui::Div {
     const PREFIX: &str = "移动模式不可逆：";
@@ -3137,7 +3181,8 @@ fn move_mode_warning() -> gpui::Div {
         .child(
             div()
                 .text_size(px(12.5))
-                .text_color(theme::AMBER_800)
+                // amber-900:12.5px 小字在 amber-50 底对比度达标
+                .text_color(theme::AMBER_900)
                 .line_height(gpui::relative(1.6))
                 .child(StyledText::new(text).with_highlights(vec![(
                     0..PREFIX.len(),
@@ -3567,20 +3612,26 @@ mod tests {
         assert!(organizable.iter().all(|m| is_organizable(m)));
     }
 
-    /// 目录树节点开合:默认展开 0/1 层;用户切换取反;
-    /// expandAll 关闭后默认全收起(用户记录同时被清空,由调用方保证)
+    /// 目录树节点开合三态:Default 展开 0/1 层、ExpandAll 全开、CollapseAll 全关;
+    /// 用户切换在任何模式下取反默认(模式切换时记录由调用方清空)
     #[test]
     fn tree_node_open_follows_default_and_user_toggle() {
-        // expandAll=true:0/1 层默认展开,2 层默认收起
-        assert!(tree_node_open(true, false, 0));
-        assert!(tree_node_open(true, false, 1));
-        assert!(!tree_node_open(true, false, 2));
-        // 用户切换 → 取反
-        assert!(!tree_node_open(true, true, 0));
-        assert!(tree_node_open(true, true, 2));
-        // expandAll=false:全部默认收起
-        assert!(!tree_node_open(false, false, 0));
-        assert!(!tree_node_open(false, false, 1));
+        use TreeExpandMode::{CollapseAll, Default, ExpandAll};
+        // Default:0/1 层默认展开,2 层默认收起
+        assert!(tree_node_open(Default, false, 0));
+        assert!(tree_node_open(Default, false, 1));
+        assert!(!tree_node_open(Default, false, 2));
+        // ExpandAll:任意深度默认展开
+        assert!(tree_node_open(ExpandAll, false, 0));
+        assert!(tree_node_open(ExpandAll, false, 5));
+        // CollapseAll:任意深度默认收起
+        assert!(!tree_node_open(CollapseAll, false, 0));
+        assert!(!tree_node_open(CollapseAll, false, 5));
+        // 用户切换 → 对各模式默认取反
+        assert!(!tree_node_open(Default, true, 0));
+        assert!(tree_node_open(Default, true, 2));
+        assert!(!tree_node_open(ExpandAll, true, 3));
+        assert!(tree_node_open(CollapseAll, true, 1));
     }
 
     /// 目录树过滤:文件名小写子串匹配;空过滤全通过
