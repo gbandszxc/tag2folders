@@ -111,8 +111,8 @@ const TABLE_BODY_MAX_H: Pixels = px(480.0);
 
 // ── 预览页常量(SOURCE_SPEC 4.2 / 2.13)────────────────────────────────────
 
-/// 模板默认值 / 输入框占位文案(SPEC 4.2.2 useState 初值)。
-const DEFAULT_TEMPLATE: &str = "{artist}/{album}/{title}.{ext}";
+/// 模板默认值 / 输入框占位文案(默认 `{album}/{track}. {title}.{ext}`，track 不足两位补零)。
+const DEFAULT_TEMPLATE: &str = "{album}/{track}. {title}.{ext}";
 
 /// 占位符芯片全表(SPEC 4.2.2 PLACEHOLDERS;tag 带花括号、中文小标)。
 const PLACEHOLDERS: [(&str, &str); 7] = [
@@ -227,13 +227,13 @@ impl ScanPage {
 pub struct PreviewPage {
     /// 目标目录选择(placeholder 动态:留空则整理到源目录(源目录))
     pub dir: Entity<DirPickerState>,
-    /// 命名模板输入(mono;默认值与 placeholder 均为 `{artist}/{album}/{title}.{ext}`)
+    /// 命名模板输入(mono;默认值与 placeholder 均为 `{album}/{track}. {title}.{ext}`)
     pub template_input: Entity<InputState>,
     /// 模板输入框是否聚焦(占位符插入的分支条件,等价源 `document.activeElement === el`)
     pub template_focused: bool,
     /// 当前悬浮的占位符芯片下标(源 PlaceholderChip 自带 hovered 态;gpui 需上提)
     pub hovered_chip: Option<usize>,
-    /// 操作模式(默认 copy;表单变更之一)
+    /// 操作模式(默认 move;表单变更之一)
     pub mode: OrganizeMode,
     pub loading: bool,
     pub error: Option<String>,
@@ -271,7 +271,7 @@ impl PreviewPage {
             template_input,
             template_focused: false,
             hovered_chip: None,
-            mode: OrganizeMode::Copy,
+            mode: OrganizeMode::Move,
             loading: false,
             error: None,
             mappings: Vec::new(),
@@ -546,7 +546,7 @@ impl AppShell {
             scanned_files: Vec::new(),
             source_dir: String::new(),
             organize_mappings: Vec::new(),
-            organize_mode: OrganizeMode::Copy,
+            organize_mode: OrganizeMode::Move,
             organize_target_dir: String::new(),
             task_id: String::new(),
             scan: ScanPage::new(window, cx),
@@ -797,11 +797,11 @@ impl AppShell {
 
     // ── 预览页逻辑(SOURCE_SPEC 4.2.3 / 4.2.5)─────────────────────────────
 
-    /// App 级 onClearOrganize(源 App.tsx):mappings=[]、organizeMode='copy'、
+    /// App 级 onClearOrganize(源 App.tsx 默认为 copy，本项目改为 move):mappings=[]、organizeMode='move'、
     /// targetDir=''。预览失败/表单变更/重扫描时调用,防止旧计划被执行。
     fn clear_organize_batch(&mut self) {
         self.organize_mappings.clear();
-        self.organize_mode = OrganizeMode::Copy;
+        self.organize_mode = OrganizeMode::Move;
         self.organize_target_dir.clear();
     }
 

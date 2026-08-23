@@ -1,4 +1,4 @@
-//! 模板渲染：`{artist}/{album}/{title}.{ext}`。
+//! 模板渲染：`{album}/{track}. {title}.{ext}`（track 不足两位补零）。
 //! 移植自 backend/core/template.py。
 
 use std::collections::HashSet;
@@ -66,11 +66,12 @@ pub fn validate_template(template: &str) -> Vec<String> {
 /// 渲染目标相对路径：正斜杠分隔、无前导斜杠；逐段清洗非法字符、
 /// Windows 保留名、尾部点/空格（但保留 `.`/`..` 段供边界检测）。
 pub fn render_path(template: &str, meta: &AudioMetadata) -> String {
+    let padded_track = format_track(meta.track.as_str());
     let values: [(&str, &str); 7] = [
         ("artist", meta.artist.as_str()),
         ("album", meta.album.as_str()),
         ("title", meta.title.as_str()),
-        ("track", meta.track.as_str()),
+        ("track", padded_track.as_str()),
         ("year", meta.year.as_str()),
         ("genre", meta.genre.as_str()),
         ("ext", meta.ext.as_str()),
@@ -100,7 +101,6 @@ pub fn render_path(template: &str, meta: &AudioMetadata) -> String {
         .collect::<Vec<_>>()
         .join("/")
 }
-
 /// 替换字面量模板段中的非法字符并转义 Windows 保留名。
 /// 除 `.` 与 `..` 外的所有段都去除尾部点/空格——Win32 会静默丢弃
 /// 尾部点/空格（`Album.` 落盘变为 `Album`），保留它们会导致预览与
@@ -152,6 +152,20 @@ fn stem_upper(s: &str) -> String {
 
 fn is_windows_reserved(stem: &str) -> bool {
     WINDOWS_RESERVED.contains(&stem)
+}
+
+/// 格式化音轨号：纯数字且不足两位时左补零（`1` → `01`，`0` → `00`）。
+/// 非纯数字（如 `A`、`01`、`12`、`Unknown`）或已是两位以上保持原样。
+fn format_track(track: &str) -> String {
+    let t = track.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    if t.chars().all(|c| c.is_ascii_digit()) && t.len() < 2 {
+        format!("{t:0>2}")
+    } else {
+        t.to_string()
+    }
 }
 
 /// 模拟 Python 列表 repr：`['a', 'b']`（占位符为 `\w+`，不会含引号）。
@@ -240,7 +254,27 @@ mod tests {
     fn test_render_path_track_year() {
         let meta = make_meta();
         let result = render_path("{year}/{track} - {title}.{ext}", &meta);
-        assert_eq!(result, "1969/1 - Come Together.mp3");
+        assert_eq!(result, "1969/01 - Come Together.mp3");
+    }
+
+    #[test]
+    fn test_render_path_track_padding() {
+        let mut meta = make_meta();
+        // 单数字补零
+        meta.track = "1".into();
+        assert_eq!(render_path("{track}. {title}.{ext}", &meta), "01. Come Together.mp3");
+        // 已两位不补
+        meta.track = "12".into();
+        assert_eq!(render_path("{track}. {title}.{ext}", &meta), "12. Come Together.mp3");
+        // 三位保持
+        meta.track = "123".into();
+        assert_eq!(render_path("{track}. {title}.{ext}", &meta), "123. Come Together.mp3");
+        // 兜底 0 补为 00
+        meta.track = "0".into();
+        assert_eq!(render_path("{track}. {title}.{ext}", &meta), "00. Come Together.mp3");
+        // 已补零的 01 保持
+        meta.track = "01".into();
+        assert_eq!(render_path("{track}. {title}.{ext}", &meta), "01. Come Together.mp3");
     }
 
     #[test]
