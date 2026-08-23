@@ -260,14 +260,27 @@ impl DirPickerState {
 // ── 渲染 ────────────────────────────────────────────────────────────────────
 
 /// 主行渲染(含可选 label / error)。
+///
+/// 键盘可达:清空按钮 `track_focus`(keyed state 句柄),Tab 循环可达,
+/// 聚焦时 Enter/Space 由框架转发为 click,聚焦态文字色同 hover;
+/// 浏览按钮由 Button 组件内置键盘焦点。
 pub fn render_dir_picker(
     dp: &Entity<DirPickerState>,
     window: &mut Window,
     cx: &mut App,
 ) -> impl IntoElement {
-    let state = dp.read(cx);
-    let value = state.input.read(cx).value().to_string();
-    let disabled = state.disabled;
+    // 集中提取 state 字段,尽早结束不可变借用(下方 use_keyed_state 需 &mut App)
+    let (value, disabled, label, error, modal_open, input_entity) = {
+        let state = dp.read(cx);
+        (
+            state.input.read(cx).value().to_string(),
+            state.disabled,
+            state.label.clone(),
+            state.error.clone(),
+            state.modal.open,
+            state.input.clone(),
+        )
+    };
     let has_value = !value.is_empty();
 
     let icon_color = if has_value {
@@ -278,7 +291,7 @@ pub fn render_dir_picker(
 
     let mut col = div().flex().flex_col().w_full();
 
-    if let Some(label) = state.label.clone() {
+    if let Some(label) = label {
         col = col.child(
             div()
                 .text_size(px(13.0))
@@ -289,10 +302,18 @@ pub fn render_dir_picker(
         );
     }
 
+    // 清空按钮的键盘焦点句柄(window 级 keyed state,按 id 持久化;
+    // Tab 循环可达,聚焦时 Enter/Space 由框架转发为 click)
+    let clear_focus = window
+        .use_keyed_state("dir-clear", cx, |_, cx| cx.focus_handle())
+        .read(cx)
+        .clone();
+    let clear_focused = clear_focus.is_focused(window);
+
     // 输入框:直接使用 Input 的 prefix 和 suffix，由 Input 内部 Flex 引擎自动垂直居中
     let input_field = {
         let dp2 = dp.clone();
-        let mut input = Input::new(&state.input);
+        let mut input = Input::new(&input_entity);
         input.style().size.height = Some(px(38.0).into());
         input
             .flex_1()
@@ -313,9 +334,15 @@ pub fn render_dir_picker(
                         .justify_center()
                         .p(px(2.0))
                         .rounded(theme::RADIUS_SM)
-                        .text_color(theme::SLATE_400)
+                        // 聚焦可见:文字/图标色提亮至 slate-600(同 hover)
+                        .text_color(if clear_focused {
+                            theme::SLATE_600
+                        } else {
+                            theme::SLATE_400
+                        })
                         .cursor_pointer()
                         .hover(|st| st.text_color(theme::SLATE_600))
+                        .track_focus(&clear_focus)
                         .child(icon_sized(Icon::X, px(14.0)))
                         .on_click(move |_, window, cx| {
                             dp2.update(cx, |state, cx| state.clear(window, cx));
@@ -350,7 +377,7 @@ pub fn render_dir_picker(
         .child(browse_btn);
     col = col.child(row);
 
-    if let Some(error) = state.error.clone() {
+    if let Some(error) = error {
         col = col.child(
             div()
                 .mt(px(4.0))
@@ -360,7 +387,7 @@ pub fn render_dir_picker(
         );
     }
     // 降级模态(打开时)
-    let with_modal: gpui::AnyElement = if state.modal.open {
+    let with_modal: gpui::AnyElement = if modal_open {
         render_browse_modal(dp, window, cx).into_any_element()
     } else {
         div().into_any_element()
@@ -370,17 +397,30 @@ pub fn render_dir_picker(
 }
 
 /// 降级目录浏览模态。
+///
+/// 键盘可达:目录条目行 `track_focus`(keyed state 句柄,按 path 稳定 key 持久化,
+/// 过滤后不漂移),Tab 循环可达,聚焦时 Enter/Space 由框架转发为 click,
+/// 聚焦态 slate-100 底色;footer/主页/上一级按钮由 Button 组件内置键盘焦点。
 fn render_browse_modal(
     dp: &Entity<DirPickerState>,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut App,
 ) -> impl IntoElement {
-    let state = dp.read(cx);
-    let current_path = state.modal.current_path.clone();
-    let loading = state.modal.loading;
-    let entries = state.filtered_entries(cx);
-    let filter_text = state.filter_input.read(cx).value().to_string();
-    let at_root = current_path.is_empty();
+    // 集中提取 state 字段,尽早结束不可变借用(循环内 use_keyed_state 需 &mut App)
+    let (current_path, loading, entries, filter_text, at_root, path_input, filter_input, modal_focus) = {
+        let state = dp.read(cx);
+        let current_path = state.modal.current_path.clone();
+        (
+            current_path.clone(),
+            state.modal.loading,
+            state.filtered_entries(cx),
+            state.filter_input.read(cx).value().to_string(),
+            current_path.is_empty(),
+            state.path_input.clone(),
+            state.filter_input.clone(),
+            state.modal_focus.clone(),
+        )
+    };
 
     // ── 路径导航行 ──
     let home_btn = {
@@ -415,7 +455,7 @@ fn render_browse_modal(
                 .flex_1()
                 .min_w(px(0.0))
                 .child(
-                    Input::new(&state.path_input)
+                    Input::new(&path_input)
                         .h(px(32.0))
                         .py(px(0.0))
                         .text_size(px(12.5))
@@ -428,7 +468,7 @@ fn render_browse_modal(
         .relative()
         .mt(px(10.0))
         .child(
-            Input::new(&state.filter_input)
+            Input::new(&filter_input)
                 .h(px(30.0))
                 .py(px(0.0))
                 .text_size(px(12.0))
@@ -504,8 +544,16 @@ fn render_browse_modal(
         for (ix, entry) in entries.iter().enumerate() {
             let dp2 = dp.clone();
             let target = entry.path.clone();
+            // 稳定 key:path 全局唯一,过滤后条目重排也不漂移(避免焦点/状态错位)
+            let row_id = SharedString::from(format!("entry-{}", entry.path));
+            // 键盘焦点句柄按同一稳定 key 持久化;Tab 可聚焦,Enter/Space 框架转发 click
+            let focus_handle = window
+                .use_keyed_state(row_id.clone(), cx, |_, cx| cx.focus_handle())
+                .read(cx)
+                .clone();
+            let focused = focus_handle.is_focused(window);
             let row = div()
-                .id(SharedString::from(format!("entry-{ix}-{}", entry.name)))
+                .id(row_id)
                 .flex()
                 .items_center()
                 .gap(px(10.0))
@@ -514,7 +562,16 @@ fn render_browse_modal(
                 .text_size(px(13.0))
                 .text_color(theme::SLATE_800)
                 .cursor_pointer()
-                .hover(|st| st.bg(theme::SLATE_50))
+                // 聚焦可见:slate-100 底色;悬浮时聚焦行维持该底色,其余行 slate-50
+                .when(focused, |el| el.bg(theme::SLATE_100))
+                .hover(move |st| {
+                    if focused {
+                        st.bg(theme::SLATE_100)
+                    } else {
+                        st.bg(theme::SLATE_50)
+                    }
+                })
+                .track_focus(&focus_handle)
                 .when(ix + 1 < entries.len(), |el| {
                     el.border_b_1().border_color(theme::SLATE_100)
                 })
@@ -615,7 +672,6 @@ fn render_browse_modal(
             )
     };
 
-    let modal_focus = state.modal_focus.clone();
     let dp_key = dp.clone();
     Modal::new("选择本地目录", move |_window, cx| {
         dp_key.update(cx, |state, cx| state.close_browse_modal(cx));

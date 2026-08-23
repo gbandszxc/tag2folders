@@ -5,6 +5,8 @@
 //!   (源规则:mousedown 且 target === 遮罩;gpui 近似:遮罩层注册 on_mouse_down,
 //!   卡片容器再用一个空 on_mouse_down 吞掉事件,效果等价)
 //! - 内容:白底、圆角 16、边框 subtle、阴影 xl、scaleUp 入场动画
+//! - 键盘可达:头部关闭按钮 `track_focus`(keyed state 句柄),Tab 循环可达,
+//!   聚焦时 Enter/Space 由 gpui 框架自动转发为 click,聚焦态 slate-100 底色
 //! - ConfirmModal:**Escape → 取消、Enter → 确认为自绘实现**(gpui-component 的
 //!   Modal 无此默认键绑定):卡片 `track_focus` 一个由调用方持有并聚焦的
 //!   FocusHandle,on_key_down 在冒泡阶段捕获 escape/enter。
@@ -101,8 +103,16 @@ impl ParentElement for Modal {
 }
 
 impl RenderOnce for Modal {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let close_on_overlay = self.close_on_overlay;
+
+        // 头部关闭按钮的键盘焦点句柄(window 级 keyed state,按 id 持久化;
+        // Tab 循环可达,聚焦时 Enter/Space 由框架转发为 click)
+        let close_focus = window
+            .use_keyed_state("modal-close", cx, |_, cx| cx.focus_handle())
+            .read(cx)
+            .clone();
+        let close_focused = close_focus.is_focused(window);
 
         // 头部:padding 16px 20px、下边框 subtle、标题 16/600/slate-900、
         // 右侧关闭按钮(ghost、padding 6、圆角 6、slate-400、XIcon 18)
@@ -138,7 +148,11 @@ impl RenderOnce for Modal {
                 .p(px(6.0))
                 .rounded(theme::RADIUS_SM)
                 .text_color(theme::SLATE_400)
+                // 聚焦可见:slate-100 底色(圆角不变)
+                .when(close_focused, |el| el.bg(theme::SLATE_100))
                 .cursor_pointer()
+                // Tab 可聚焦;框架自动把聚焦态 Enter/Space 转发为 click
+                .track_focus(&close_focus)
                 .child(icon_sized(Icon::X, px(18.0)).text_color(theme::SLATE_400))
                 .on_click(move |_, window, cx| on_close(window, cx))
         };

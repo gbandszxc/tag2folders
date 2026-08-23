@@ -1803,9 +1803,17 @@ impl AppShell {
                 this.scan.filter_field = *f;
                 cx.notify();
             });
+            // 键盘焦点:按元素 id 持久化的 FocusHandle(window 级 keyed state),
+            // Tab 聚焦 + Enter/Space 激活由框架提供(track_focus)
+            let chip_id = SharedString::from(format!("filter-field-{}", field.key()));
+            let focus_handle = window
+                .use_keyed_state(chip_id.clone(), cx, |_, cx| cx.focus_handle())
+                .read(cx)
+                .clone();
+            let focused = focus_handle.is_focused(window);
             filter_bar = filter_bar.child(
                 div()
-                    .id(SharedString::from(format!("filter-field-{}", field.key())))
+                    .id(chip_id)
                     .px(px(12.0))
                     .py(px(4.0))
                     .text_size(px(12.0))
@@ -1813,14 +1821,20 @@ impl AppShell {
                     .rounded(theme::RADIUS_FULL)
                     .whitespace_nowrap()
                     .cursor_pointer()
+                    .track_focus(&focus_handle)
+                    // 聚焦可见 = 悬浮样式(不加边框,避免布局位移)
                     .when(selected, |el| {
-                        el.bg(theme::AMBER_500)
+                        el.bg(if focused { theme::AMBER_600 } else { theme::AMBER_500 })
                             .text_color(theme::SLATE_800)
                             .hover(|st| st.bg(theme::AMBER_600))
                     })
                     .when(!selected, |el| {
-                        el.bg(theme::SLATE_200)
-                            .text_color(theme::SLATE_600)
+                        el.bg(if focused { theme::SLATE_300 } else { theme::SLATE_200 })
+                            .text_color(if focused {
+                                theme::SLATE_800
+                            } else {
+                                theme::SLATE_600
+                            })
                             .hover(|st| st.bg(theme::SLATE_300).text_color(theme::SLATE_800))
                     })
                     .child(label)
@@ -2151,6 +2165,8 @@ impl AppShell {
                 tag,
                 label,
                 hovered_chip == Some(ix),
+                window,
+                cx,
                 on_insert,
                 on_chip_hover,
             ));
@@ -2188,6 +2204,8 @@ impl AppShell {
                             theme::SLATE_600
                         },
                         None,
+                        window,
+                        cx,
                         on_copy,
                     ))
                     .child(segment_btn(
@@ -2201,6 +2219,8 @@ impl AppShell {
                             theme::SLATE_600
                         },
                         None,
+                        window,
+                        cx,
                         on_move,
                     )),
             );
@@ -2358,6 +2378,8 @@ impl AppShell {
                                 theme::SLATE_600
                             },
                             Some(mappings.len()),
+                            window,
+                            cx,
                             on_tab_list,
                         ))
                         .child(segment_btn(
@@ -2371,6 +2393,8 @@ impl AppShell {
                                 theme::SLATE_600
                             },
                             None,
+                            window,
+                            cx,
                             on_tab_tree,
                         )),
                 )
@@ -2413,7 +2437,7 @@ impl AppShell {
                 }
                 PreviewTab::Tree => div()
                     .mt(px(12.0))
-                    .child(self.render_directory_tree(cx))
+                    .child(self.render_directory_tree(window, cx))
                     .into_any_element(),
             };
 
@@ -2499,7 +2523,12 @@ impl AppShell {
 
     /// 目录树组件外壳:头部工具栏(Layers 标题 / 过滤输入 / 全部折叠切换)+
     /// 主体(容器内滚动、min 140 / max 420、bg slate-50)+ 空态。
-    fn render_directory_tree(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// 目录行与过滤清空小按钮键盘可达(Tab 聚焦 + Enter/Space 激活由框架提供)。
+    fn render_directory_tree(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let filter_raw = self.preview.tree_filter.read(cx).value().to_string();
         let filter_lower = filter_raw.to_lowercase();
 
@@ -2524,6 +2553,12 @@ impl AppShell {
             });
             cx.notify();
         });
+        // 清空小按钮的键盘焦点(按元素 id 持久化,window 级 keyed state)
+        let clear_focus_handle = window
+            .use_keyed_state("tree-filter-clear", cx, |_, cx| cx.focus_handle())
+            .read(cx)
+            .clone();
+        let clear_focused = clear_focus_handle.is_focused(window);
         // 主体:根层遍历(子目录对象键 + `__files__` 文件组;serde_json Map 为
         // BTreeMap,同层目录/文件按字典序排列)
         let tree = &self.preview.directory_tree;
@@ -2554,6 +2589,7 @@ impl AppShell {
                             v,
                             0,
                             &filter_lower,
+                            window,
                             cx,
                         ));
                     }
@@ -2643,6 +2679,11 @@ impl AppShell {
                                                         .p(px(2.0))
                                                         .rounded(theme::RADIUS_XS)
                                                         .cursor_pointer()
+                                                        .track_focus(&clear_focus_handle)
+                                                        // 聚焦可见 = 悬浮底色
+                                                        .when(clear_focused, |el| {
+                                                            el.bg(theme::SLATE_200)
+                                                        })
                                                         .hover(|st| st.bg(theme::SLATE_200))
                                                         .child(
                                                             icon_sized(Icon::X, px(11.0))
@@ -2703,6 +2744,7 @@ impl AppShell {
 
     /// 目录节点行(递归):箭头 + 文件夹图标 + 目录名 + 数量徽标 `(直接子项数)`;
     /// 展开时先渲染子目录、后渲染 `__files__` 文件组。
+    /// 键盘可达:Tab 聚焦 + Enter/Space 激活由框架提供(track_focus)。
     fn render_tree_node(
         &self,
         path_key: &str,
@@ -2710,6 +2752,7 @@ impl AppShell {
         node: &serde_json::Value,
         depth: usize,
         filter_lower: &str,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         let path_key = path_key.to_string();
@@ -2733,11 +2776,19 @@ impl AppShell {
             cx.notify();
         });
 
+        // 键盘焦点:行 id `tree-dir-{path}` 天然稳定,直接作 keyed state 的 key
+        let row_id = SharedString::from(format!("tree-dir-{path_key}"));
+        let focus_handle = window
+            .use_keyed_state(row_id.clone(), cx, |_, cx| cx.focus_handle())
+            .read(cx)
+            .clone();
+        let focused = focus_handle.is_focused(window);
+
         // 目录行:padding 5px 12px 5px (depth*20+6)、fontSize 13、weight 600、
         // slate-800、圆角 6、hover slate-100;箭头 14 slate-400;
         // FolderOpen/Folder 16 amber-500;数量徽标 11 slate-400
         let row = div()
-            .id(SharedString::from(format!("tree-dir-{path_key}")))
+            .id(row_id)
             .flex()
             .items_center()
             .gap(px(6.0))
@@ -2749,6 +2800,9 @@ impl AppShell {
             .text_color(theme::SLATE_800)
             .rounded(theme::RADIUS_SM)
             .cursor_pointer()
+            .track_focus(&focus_handle)
+            // 聚焦可见 = 悬浮底色
+            .when(focused, |el| el.bg(theme::SLATE_100))
             .hover(|st| st.bg(theme::SLATE_100))
             .child(
                 icon_sized(
@@ -2782,6 +2836,7 @@ impl AppShell {
                     v,
                     depth + 1,
                     filter_lower,
+                    window,
                     cx,
                 ));
             }
@@ -3037,6 +3092,7 @@ fn render_log_line(ix: usize, line: &str) -> gpui::Stateful<gpui::Div> {
 /// 激活 = weight 600 + amber-900(小字 13px 在白底需 ≥4.5:1,amber-800 仅 ~4.1)+
 /// 白底 + 圆角 6 + shadow-xs;
 /// 未激活 = weight 500 + slate-600 + 透明底。可选计数徽章(list Tab)。
+/// 键盘可达:Tab 聚焦 + Enter/Space 激活由框架提供(track_focus)。
 fn segment_btn(
     id: &str,
     label: &str,
@@ -3044,10 +3100,19 @@ fn segment_btn(
     active: bool,
     icon_color: gpui::Rgba,
     badge: Option<usize>,
+    window: &mut Window,
+    cx: &mut gpui::App,
     on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
 ) -> gpui::Stateful<gpui::Div> {
+    // 键盘焦点:按元素 id 持久化的 FocusHandle(window 级 keyed state)
+    let btn_id = SharedString::from(id.to_string());
+    let focus_handle = window
+        .use_keyed_state(btn_id.clone(), cx, |_, cx| cx.focus_handle())
+        .read(cx)
+        .clone();
+    let focused = focus_handle.is_focused(window);
     let mut btn = div()
-        .id(SharedString::from(id.to_string()))
+        .id(btn_id)
         .flex()
         .items_center()
         .gap(px(6.0))
@@ -3058,6 +3123,14 @@ fn segment_btn(
         .rounded(theme::RADIUS_SM)
         .whitespace_nowrap()
         .cursor_pointer()
+        // 常驻 1px 透明边框防聚焦变色时布局位移;聚焦时用焦点边框色
+        .border_1()
+        .border_color(if focused {
+            theme::BORDER_FOCUS
+        } else {
+            gpui::transparent_black().into()
+        })
+        .track_focus(&focus_handle)
         .child(icon_sized(icon, px(14.0)).text_color(icon_color))
         .child(div().child(label.to_string()))
         .on_click(move |e: &gpui::ClickEvent, window, cx| on_click(e, window, cx));
@@ -3095,14 +3168,24 @@ fn segment_btn(
 /// 悬浮图标 amber-800(amber-700 on amber-100 仅 2.86:1,图标需 ≥3:1);
 /// 悬浮 = amber-400 边框 + amber-100 底 + 深色文字(#0f172a)。
 /// hover 逐子元素变色在 gpui 需页面持有 hover 状态(on_hover 上提实现)。
+/// 键盘可达:Tab 聚焦 + Enter/Space 激活由框架提供(track_focus)。
 fn placeholder_chip(
     ix: usize,
     tag: &str,
     label: &str,
     hovered: bool,
+    window: &mut Window,
+    cx: &mut gpui::App,
     on_insert: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
     on_hover: impl Fn(&bool, &mut Window, &mut gpui::App) + 'static,
 ) -> gpui::Stateful<gpui::Div> {
+    // 键盘焦点:按元素 id 持久化的 FocusHandle(window 级 keyed state)
+    let chip_id = SharedString::from(format!("ph-chip-{ix}"));
+    let focus_handle = window
+        .use_keyed_state(chip_id.clone(), cx, |_, cx| cx.focus_handle())
+        .read(cx)
+        .clone();
+    let focused = focus_handle.is_focused(window);
     let (border, bg, text, icon_color, label_color) = if hovered {
         (
             theme::AMBER_400,
@@ -3121,8 +3204,10 @@ fn placeholder_chip(
             theme::SLATE_500,
         )
     };
+    // 聚焦边框优先于悬浮边框(芯片已有 1px 边框,无布局位移)
+    let border = if focused { theme::BORDER_FOCUS } else { border };
     div()
-        .id(SharedString::from(format!("ph-chip-{ix}")))
+        .id(chip_id)
         .flex()
         .items_center()
         .gap(px(5.0))
@@ -3135,6 +3220,7 @@ fn placeholder_chip(
         .bg(bg)
         .text_color(text)
         .cursor_pointer()
+        .track_focus(&focus_handle)
         .child(icon_sized(Icon::Tag, px(12.0)).text_color(icon_color))
         .child(
             div()
