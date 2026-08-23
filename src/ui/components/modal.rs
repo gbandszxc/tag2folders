@@ -180,6 +180,7 @@ impl RenderOnce for Modal {
                     .border_t_1()
                     .border_color(theme::BORDER_SUBTLE)
                     .bg(theme::SLATE_50)
+                    .rounded_b(theme::RADIUS_XL)
                     .child(footer),
             );
         }
@@ -490,13 +491,36 @@ impl RenderOnce for ConfirmModal {
             .px(px(20.0))
             .py(px(12.0))
             .bg(theme::SLATE_50)
+            .rounded_b(theme::RADIUS_XL)
             .border_t_1()
             .border_color(theme::BORDER_SUBTLE)
             .child(
-                Button::new("confirm-cancel")
-                    .label(self.options.cancel_text.clone())
-                    .min_w(px(76.0))
-                    .on_click(move |_, w, cx| on_cancel(w, cx)),
+                div()
+                    .id("confirm-cancel-wrap")
+                    .w(px(76.0))
+                    .h(px(32.0))
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .rounded(theme::RADIUS_MD)
+                    .border_1()
+                    .border_color(theme::SLATE_200)
+                    .bg(theme::SLATE_100)
+                    .text_color(theme::SLATE_700)
+                    .font_weight(gpui::FontWeight(500.0))
+                    .text_size(px(13.0))
+                    .line_height(gpui::relative(1.25))
+                    .cursor_pointer()
+                    .hover(|st| {
+                        st.bg(theme::SLATE_200)
+                            .text_color(theme::SLATE_900)
+                            .border_color(theme::SLATE_300)
+                    })
+                    .on_click(move |_: &ClickEvent, w: &mut Window, cx: &mut App| {
+                        on_cancel(w, cx);
+                    })
+                    .child(self.options.cancel_text.clone()),
             )
             .child(
                 div()
