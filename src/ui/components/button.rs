@@ -179,7 +179,14 @@ impl Button {
 }
 
 impl RenderOnce for Button {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // 键盘焦点:按元素 id 持久化的 FocusHandle(window 级 keyed state,
+        // RenderOnce 每帧重建组件的标准焦点方案,同 gpui-component Button)
+        let focus_handle = window
+            .use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle())
+            .read(cx)
+            .clone();
+
         let (pad_y, pad_x, font_size, radius, font_weight) = match self.size {
             ButtonSize::Sm => (px(5.0), px(10.0), px(12.0), theme::RADIUS_SM, 500),
             ButtonSize::Lg => (px(10.0), px(20.0), px(14.0), theme::RADIUS_LG, 600),
@@ -188,6 +195,8 @@ impl RenderOnce for Button {
 
         let effective_disabled = self.disabled || self.loading;
         let has_text = self.label.is_some();
+        // 聚焦可见态仅对可交互按钮生效(禁用态不参与聚焦)
+        let focused = !effective_disabled && focus_handle.is_focused(window);
 
         // 变体三态(常态/悬浮/按下)
         let (bg, fg, border, weight_override) = match self.variant {
@@ -195,7 +204,8 @@ impl RenderOnce for Button {
             ButtonVariant::Secondary => (theme::SLATE_100, theme::SLATE_700, theme::SLATE_200, None),
             ButtonVariant::Outline => (gpui::transparent_black().into(), theme::SLATE_700, theme::BORDER_DEFAULT, None),
             ButtonVariant::Ghost => (gpui::transparent_black().into(), theme::SLATE_600, gpui::transparent_black().into(), None),
-            ButtonVariant::Danger => (theme::ROSE_50, theme::ROSE_600, theme::ROSE_200, None),
+            // Danger 常态文字用 rose-700(5.72:1 达 AA;rose-600 on rose-50 仅 4.28:1 不达标)
+            ButtonVariant::Danger => (theme::ROSE_50, theme::ROSE_700, theme::ROSE_200, None),
         };
         let (h_bg, h_fg, h_border) = match self.variant {
             ButtonVariant::Primary => (theme::AMBER_600, theme::SLATE_900, theme::AMBER_700),
@@ -212,6 +222,9 @@ impl RenderOnce for Button {
             ButtonVariant::Danger => (theme::ROSE_600, theme::TEXT_ON_PRIMARY, theme::ROSE_600),
         };
         let font_weight = weight_override.unwrap_or(font_weight);
+
+        // 聚焦可见:复用既有 1px 边框改色,不引起布局位移
+        let border = if focused { theme::BORDER_FOCUS } else { border };
 
         // 主按钮阴影:常态 0 1px 2px rgba(0,0,0,0.05),悬浮 0 2px 4px rgba(0,0,0,0.08)
         let (shadow_normal, shadow_hover) = if self.variant == ButtonVariant::Primary {
@@ -279,7 +292,9 @@ impl RenderOnce for Button {
             .text_color(fg)
             .when_some(shadow_normal, |el, s| el.shadow(s))
             .when(!effective_disabled, |el| {
-                el.cursor_pointer()
+                // track_focus 使按钮可 Tab 聚焦;框架对聚焦元素自动把 Enter/Space 转发为 click
+                el.track_focus(&focus_handle)
+                    .cursor_pointer()
                     .hover(move |st| {
                         let st = st.bg(h_bg).text_color(h_fg).border_color(h_border);
                         if let Some(sh) = shadow_hover {
