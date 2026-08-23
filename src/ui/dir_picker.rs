@@ -456,7 +456,8 @@ fn render_browse_modal(
             .gap(px(8.0))
             .h(px(280.0))
             .text_size(px(13.0))
-            .text_color(theme::SLATE_400)
+            // 文字用 slate-500 保证浅底对比度;旋转图标维持 slate-400
+            .text_color(theme::SLATE_500)
             .child(
                 svg()
                     .path(Icon::Refresh.path())
@@ -486,7 +487,8 @@ fn render_browse_modal(
             .gap(px(8.0))
             .h(px(280.0))
             .text_size(px(13.0))
-            .text_color(theme::SLATE_400)
+            // 空态文字用 slate-500;Folder 图标(装饰)维持 slate-300
+            .text_color(theme::SLATE_500)
             .child(icon_sized(Icon::Folder, px(24.0)).text_color(theme::SLATE_300))
             .child(empty_text)
             .into_any_element()
@@ -528,7 +530,7 @@ fn render_browse_modal(
                 .child(
                     div()
                         .text_size(px(11.0))
-                        .text_color(theme::SLATE_400)
+                        .text_color(theme::SLATE_500)
                         .child("进入 ›"),
                 )
                 .on_click(move |_, window, cx| {

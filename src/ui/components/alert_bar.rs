@@ -1,7 +1,7 @@
 //! 内联提示条(无 toast,全部内联;rose=错误 / amber=警告 / sky=信息)。
 //!
 //! 样式:flex、gap 10、padding 10px 14px、圆角 8px、图标 15 + 文本
-//! fontSize 12.5。rose/sky 文字色用近黑 #0f172a;amber 系文字色为 amber-800。
+//! fontSize 12.5。rose/sky 文字色用近黑 #0f172a;amber 系文字色为 amber-900。
 //!
 //! 支持多行文本(错误条 pre-wrap)。
 
@@ -17,7 +17,7 @@ use crate::ui::{Icon, icon_sized};
 pub enum AlertVariant {
     /// 错误(rose):bg rose-50 / border rose-200 / icon rose-600 / 文字 #0f172a
     Rose,
-    /// 警告(amber):bg amber-50 / border amber-200 / icon amber-600 / 文字 amber-800
+    /// 警告(amber):bg amber-50 / border amber-200 / icon amber-600 / 文字 amber-900
     Amber,
     /// 信息(sky):bg sky-50 / border sky-200 / icon sky-600 / 文字 #0f172a
     Sky,
@@ -37,7 +37,8 @@ impl AlertVariant {
                 theme::AMBER_50,
                 theme::AMBER_200,
                 theme::AMBER_600,
-                theme::AMBER_800,
+                // amber-900:amber-50 上对比度 7.37:1,满足 12.5px 正文 4.5:1
+                theme::AMBER_900,
             ),
             AlertVariant::Sky => (
                 theme::SKY_50,

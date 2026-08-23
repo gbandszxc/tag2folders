@@ -133,14 +133,16 @@ impl StepNav {
         } else {
             icon_sized(step.icon, px(18.0)).text_color(tile_fg)
         };
+        // dimmed 文字用 slate-500:整行已有 opacity(0.5) 压暗,底色过浅提升字色保证可读
         let title_color = if dimmed {
-            theme::SLATE_400
+            theme::SLATE_500
         } else if active {
             theme::AMBER_900
         } else {
             theme::SLATE_800
         };
-        let desc_color = if dimmed { theme::SLATE_400 } else { theme::SLATE_500 };
+        // 描述文字 dimmed 与默认统一 slate-500(dimmed 靠 opacity 压暗)
+        let desc_color = theme::SLATE_500;
 
         // 右侧状态徽标四选一
         let status: gpui::AnyElement = if active {
@@ -161,7 +163,8 @@ impl StepNav {
             div()
                 .text_size(px(11.0))
                 .font_weight(gpui::FontWeight(600.0))
-                .text_color(theme::EMERALD_600)
+                // 11px 小字用 emerald-700 保证白底对比度;瓦片 Check 图标维持 emerald-600
+                .text_color(theme::EMERALD_700)
                 .child("已完成")
                 .into_any_element()
         } else if unlocked {
@@ -171,7 +174,7 @@ impl StepNav {
         } else {
             div()
                 .text_size(px(11.0))
-                .text_color(theme::SLATE_400)
+                .text_color(theme::SLATE_500)
                 .child("未解锁")
                 .into_any_element()
         };
