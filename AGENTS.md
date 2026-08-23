@@ -17,6 +17,11 @@
        https://docs.rs/gpui
    - **组件复用加速开发**：涉及高交互控件（如 `Input`、`Checkbox`、`Button`、`Modal/Dialog`、`Dropdown`、`Table`、`VirtualList` 等），优先引用或基于 `gpui-component`（配合 `theme::apply_to_gpui_component` 换肤）构建，避免低效造轮子。
    - **版本约束**：锁定使用 `Cargo.toml` 声明的 crates.io 注册表版本，**严禁混入 Git 依赖的 gpui**（会与 `gpui-component` 产生双版本类型冲突）。
+4. **构建与发布规范（打 Release 优先使用打包脚本）：**
+   - 显式声明：本项目中“打 release / 发布打包”**优先指通过项目自带脚本生成平台分发安装包**，而非单纯执行 `cargo build --release`。
+   - **macOS 打包**：优先运行 `scripts/build-dmg.sh`（自动完成 release 构建、图标生成、.app 组装、ad-hoc 签名并生成 `target/dmg/tag2folders_<version>_<arch>.dmg`）。
+   - **Windows 打包**：优先运行 `scripts/build-msi.ps1`（基于 WiX v5 生成 `target/msi/tag2folders_<version>_<arch>.msi`）。
+   - 详细打包参数、环境变量与说明见 `docs/PACKAGING.md`。
 
 ## Git规范
 
