@@ -1,186 +1,310 @@
 {
-  "schemaVersion": 2,
-  "generatedAt": "2026-08-23T10:23:04+08:00",
-  "title": "Design System: Tag2Folders",
-  "extensions": {
-    "colorMeta": {
-      "primary": {
-        "role": "primary",
-        "displayName": "Workbench Amber",
-        "canonical": "#f59e0b",
-        "tonalRamp": ["#7d4600", "#b36900", "#b45309", "#d97706", "#f59e0b", "#ffc533", "#ffdc80", "#fde68a"]
-      },
-      "primary-ring": {
-        "role": "primary",
-        "displayName": "Focus Ring",
-        "canonical": "#ffae00"
-      },
-      "ink": {
-        "role": "neutral",
-        "displayName": "Ink",
-        "canonical": "#0f172a",
-        "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"]
-      },
-      "surface": {
-        "role": "neutral",
-        "displayName": "Paper",
-        "canonical": "#ffffff"
-      },
-      "app-bg": {
-        "role": "neutral",
-        "displayName": "Workbench Grey",
-        "canonical": "#f8fafc"
-      },
-      "console-bg": {
-        "role": "neutral",
-        "displayName": "Console Black",
-        "canonical": "#020617"
-      },
-      "success": {
-        "role": "tertiary",
-        "displayName": "Signal Green",
-        "canonical": "#059669",
-        "tonalRamp": ["#047857", "#059669", "#10b981", "#a7f3d0", "#d1fae5", "#ecfdf5"]
-      },
-      "danger": {
-        "role": "tertiary",
-        "displayName": "Signal Red",
-        "canonical": "#e11d48",
-        "tonalRamp": ["#be123c", "#e11d48", "#f43f5e", "#fecdd3", "#ffe4e6", "#fff1f2"]
-      },
-      "info": {
-        "role": "tertiary",
-        "displayName": "Signal Blue",
-        "canonical": "#0284c7",
-        "tonalRamp": ["#0369a1", "#0284c7", "#0ea5e9", "#bae6fd", "#e0f2fe", "#f0f9ff"]
-      }
-    },
-    "typographyMeta": {
-      "display": { "displayName": "Display", "purpose": "进度百分比大字，全应用唯一 display 用法。" },
-      "headline": { "displayName": "Headline", "purpose": "完成/失败横幅标题、模态标题。" },
-      "title": { "displayName": "Title", "purpose": "卡片标题、品牌标题。" },
-      "body": { "displayName": "Body", "purpose": "正文与控件文字，基准 14px / 1.5。" },
-      "label": { "displayName": "Label", "purpose": "徽章、字段标签、表格表头。" },
-      "mono": { "displayName": "Mono", "purpose": "路径 / 模板 / 日志 / 目录树文件名等文件系统内容。" }
-    },
-    "shadows": [
-      { "name": "shadow-xs", "value": "0 1px 2px 0 rgba(15,23,42,0.05)", "purpose": "卡片与激活分段按钮的常驻微光——最常用。" },
-      { "name": "primary-btn", "value": "0 1px 2px rgba(0,0,0,0.05)", "purpose": "主按钮常态；hover 换 0 2px 4px rgba(0,0,0,0.08)。" },
-      { "name": "brand-tile", "value": "0 1px 3px rgba(0,0,0,0.1)", "purpose": "顶栏品牌方块。" },
-      { "name": "step-active", "value": "0 1px 4px rgba(217,133,0,0.25)", "purpose": "激活步骤瓦片的琥珀色温光。" },
-      { "name": "confirm-modal", "value": "0 12px 36px rgba(15,23,42,0.16)", "purpose": "确认弹窗卡片。" },
-      { "name": "modal-xl", "value": "0 20px 25px -5px rgba(15,23,42,0.1), 0 8px 10px -6px rgba(15,23,42,0.06)", "purpose": "通用模态。" },
-      { "name": "sticky-bar", "value": "0 -6px 16px rgba(15,23,42,0.05)", "purpose": "底部导航条的上抛光。" }
-    ],
-    "motion": [
-      { "name": "spin", "value": "1s linear infinite", "purpose": "loading 旋转图标——全局仅有的两个动效之一。" },
-      { "name": "pulse", "value": "2s opacity 1↔0.6", "purpose": "进行中步骤/当前文件的脉冲圆点。" },
-      { "name": "no-transitions", "value": "none", "purpose": "运行时（gpui）无 CSS 过渡，状态切换全部瞬时；不要伪造 hover/入场过渡。" }
+ "schemaVersion": 2,
+ "generatedAt": "2026-08-23T16:32:02+08:00",
+ "title": "Design System: Tag2Folders",
+ "extensions": {
+  "colorMeta": {
+   "primary": {
+    "role": "primary",
+    "displayName": "Workbench Amber",
+    "canonical": "#f59e0b",
+    "tonalRamp": [
+     "#7d4600",
+     "#b36900",
+     "#b45309",
+     "#d97706",
+     "#f59e0b",
+     "#ffc533",
+     "#ffdc80",
+     "#fde68a"
     ]
+   },
+   "primary-ring": {
+    "role": "primary",
+    "displayName": "Focus Ring",
+    "canonical": "#ffae00"
+   },
+   "ink": {
+    "role": "neutral",
+    "displayName": "Ink",
+    "canonical": "#0f172a",
+    "tonalRamp": [
+     "#020617",
+     "#0f172a",
+     "#1e293b",
+     "#334155",
+     "#475569",
+     "#64748b",
+     "#94a3b8",
+     "#cbd5e1"
+    ]
+   },
+   "surface": {
+    "role": "neutral",
+    "displayName": "Paper",
+    "canonical": "#ffffff"
+   },
+   "app-bg": {
+    "role": "neutral",
+    "displayName": "Workbench Grey",
+    "canonical": "#f8fafc"
+   },
+   "console-bg": {
+    "role": "neutral",
+    "displayName": "Console Black",
+    "canonical": "#020617"
+   },
+   "success": {
+    "role": "tertiary",
+    "displayName": "Signal Green",
+    "canonical": "#059669",
+    "tonalRamp": [
+     "#047857",
+     "#059669",
+     "#10b981",
+     "#a7f3d0",
+     "#d1fae5",
+     "#ecfdf5"
+    ]
+   },
+   "danger": {
+    "role": "tertiary",
+    "displayName": "Signal Red",
+    "canonical": "#e11d48",
+    "tonalRamp": [
+     "#be123c",
+     "#e11d48",
+     "#f43f5e",
+     "#fecdd3",
+     "#ffe4e6",
+     "#fff1f2"
+    ]
+   },
+   "info": {
+    "role": "tertiary",
+    "displayName": "Signal Blue",
+    "canonical": "#0284c7",
+    "tonalRamp": [
+     "#0369a1",
+     "#0284c7",
+     "#0ea5e9",
+     "#bae6fd",
+     "#e0f2fe",
+     "#f0f9ff"
+    ]
+   }
   },
-  "components": [
-    {
-      "name": "Primary Button",
-      "kind": "button",
-      "refersTo": "button-primary",
-      "description": "主动作按钮：琥珀底 + slate-800 字，悬浮/按下走 amber-600/700 梯度。",
-      "html": "<button class=\"ds-btn-primary\">开始扫描</button>",
-      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 6px; background: #f59e0b; color: #1e293b; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 13px; font-weight: 600; line-height: 1.25; padding: 8px 14px; border: 1px solid #d97706; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); cursor: pointer; white-space: nowrap; } .ds-btn-primary:hover { background: #d97706; color: #0f172a; border-color: #b45309; box-shadow: 0 2px 4px rgba(0,0,0,0.08); } .ds-btn-primary:active { background: #b45309; color: #ffffff; border-color: #b36900; } .ds-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; pointer-events: none; }"
-    },
-    {
-      "name": "Ghost Button",
-      "kind": "button",
-      "refersTo": "button-ghost",
-      "description": "低强调操作（重置、清空）：透明底灰字，悬浮 slate-100。",
-      "html": "<button class=\"ds-btn-ghost\">重置</button>",
-      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: #475569; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 12px; font-weight: 500; padding: 5px 10px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; } .ds-btn-ghost:hover { background: #f1f5f9; color: #0f172a; }"
-    },
-    {
-      "name": "Outline Button",
-      "kind": "button",
-      "refersTo": "button-outline",
-      "description": "次级动作（返回扫描、清空筛选）：透明底 + slate 边框。",
-      "html": "<button class=\"ds-btn-outline\">返回扫描</button>",
-      "css": ".ds-btn-outline { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: #334155; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 13px; font-weight: 500; padding: 8px 16px; border: 1px solid #cbd5e1; border-radius: 8px; cursor: pointer; } .ds-btn-outline:hover { background: #f8fafc; color: #0f172a; border-color: #94a3b8; }"
-    },
-    {
-      "name": "Mono Path Input",
-      "kind": "input",
-      "refersTo": "input",
-      "description": "文件系统的入口：Menlo 38px 高，聚焦边框 amber-500。",
-      "html": "<input class=\"ds-input\" placeholder=\"例如 D:\\Music 或 /Users/me/Music\" />",
-      "css": ".ds-input { width: 100%; height: 38px; background: #ffffff; color: #0f172a; font-family: Menlo, ui-monospace, monospace; font-size: 13px; padding: 8px 12px 8px 34px; border: 1px solid #cbd5e1; border-radius: 8px; outline: none; } .ds-input:hover { border-color: #94a3b8; } .ds-input:focus { border-color: #f59e0b; } .ds-input:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }"
-    },
-    {
-      "name": "Card",
-      "kind": "card",
-      "refersTo": "card",
-      "description": "台面上的托盘：白底 12px 圆角 1px subtle 边 + 微光；带标题行。",
-      "html": "<div class=\"ds-card\"><div class=\"ds-card-head\"><div><div class=\"ds-card-title\">扫描源目录</div><div class=\"ds-card-sub\">选择包含音频文件的文件夹，扫描并读取标签信息</div></div></div><div class=\"ds-card-body\">…</div></div>",
-      "css": ".ds-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 2px 0 rgba(15,23,42,0.05); overflow: hidden; } .ds-card-head { display: flex; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid #e2e8f0; } .ds-card-title { font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 15px; font-weight: 600; color: #1e293b; } .ds-card-sub { font-size: 12px; color: #64748b; margin-top: 2px; } .ds-card-body { padding: 18px 22px; }"
-    },
-    {
-      "name": "Amber Badge",
-      "kind": "chip",
-      "refersTo": "badge-amber",
-      "description": "标签纸三件套：soft 底 + 深字 + line 边的胶囊。",
-      "html": "<span class=\"ds-badge\">v2.0.1</span>",
-      "css": ".ds-badge { display: inline-flex; align-items: center; gap: 4px; background: #fef3c7; color: #7d4600; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border: 1px solid #ffdc80; border-radius: 9999px; line-height: 1.4; white-space: nowrap; }"
-    },
-    {
-      "name": "Amber Alert Bar",
-      "kind": "custom",
-      "refersTo": "alert-amber",
-      "description": "内联警告（无 toast）：amber-50 底 + 三角图标 + 12.5px 深字。",
-      "html": "<div class=\"ds-alert\"><span class=\"ds-alert-icon\">⚠</span><span>移动模式不可逆：执行后源文件将从原目录删除。</span></div>",
-      "css": ".ds-alert { display: flex; align-items: flex-start; gap: 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 12.5px; color: #b36900; line-height: 1.6; } .ds-alert-icon { color: #d97706; }"
-    },
-    {
-      "name": "Segment Control",
-      "kind": "custom",
-      "refersTo": "segment-active",
-      "description": "单选分段胶囊：slate-100 轨道 + 白底激活片（amber-800 字 + 微光）。",
-      "html": "<div class=\"ds-segment\"><button class=\"ds-seg ds-seg-active\">复制（保留源文件）</button><button class=\"ds-seg\">移动（删除源文件）</button></div>",
-      "css": ".ds-segment { display: inline-flex; padding: 3px; gap: 2px; background: #f1f5f9; border-radius: 8px; } .ds-seg { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: #475569; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 13px; font-weight: 500; padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; } .ds-seg-active { background: #ffffff; color: #b36900; font-weight: 600; box-shadow: 0 1px 2px 0 rgba(15,23,42,0.05); }"
-    },
-    {
-      "name": "Step Nav Item (active)",
-      "kind": "custom",
-      "refersTo": "segment-active",
-      "description": "签名组件：38×38 激活步骤瓦片——琥珀底 + 色温光 + 脉冲圆点。",
-      "html": "<div class=\"ds-step\"><div class=\"ds-step-tile\">▶</div><div class=\"ds-step-text\"><div class=\"ds-step-title\">执行整理</div><div class=\"ds-step-desc\">批量安全归档与监控</div></div><span class=\"ds-step-dot\"></span></div>",
-      "css": ".ds-step { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 12px; } .ds-step-tile { width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; background: #f59e0b; color: #1e293b; border-radius: 10px; box-shadow: 0 1px 4px rgba(217,133,0,0.25); } .ds-step-title { font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 13px; font-weight: 700; color: #7d4600; } .ds-step-desc { font-size: 11px; color: #64748b; margin-top: 2px; } .ds-step-dot { width: 7px; height: 7px; border-radius: 9999px; background: #f59e0b; margin-left: auto; animation: ds-pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; } @keyframes ds-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }"
-    }
+  "typographyMeta": {
+   "display": {
+    "displayName": "Display",
+    "purpose": "进度百分比大字，全应用唯一 display 用法。"
+   },
+   "headline": {
+    "displayName": "Headline",
+    "purpose": "完成/失败横幅标题、模态标题。"
+   },
+   "title": {
+    "displayName": "Title",
+    "purpose": "卡片标题、品牌标题。"
+   },
+   "body": {
+    "displayName": "Body",
+    "purpose": "正文与控件文字，基准 14px / 1.5。"
+   },
+   "label": {
+    "displayName": "Label",
+    "purpose": "徽章、字段标签、表格表头。"
+   },
+   "mono": {
+    "displayName": "Mono",
+    "purpose": "路径 / 模板 / 日志 / 目录树文件名等文件系统内容。"
+   }
+  },
+  "shadows": [
+   {
+    "name": "shadow-xs",
+    "value": "0 1px 2px 0 rgba(15,23,42,0.05)",
+    "purpose": "卡片与激活分段按钮的常驻微光——最常用。"
+   },
+   {
+    "name": "primary-btn",
+    "value": "0 1px 2px rgba(0,0,0,0.05)",
+    "purpose": "主按钮常态；hover 换 0 2px 4px rgba(0,0,0,0.08)。"
+   },
+   {
+    "name": "brand-tile",
+    "value": "0 1px 3px rgba(0,0,0,0.1)",
+    "purpose": "顶栏品牌方块。"
+   },
+   {
+    "name": "step-active",
+    "value": "0 1px 4px rgba(217,133,0,0.25)",
+    "purpose": "激活步骤瓦片的琥珀色温光。"
+   },
+   {
+    "name": "confirm-modal",
+    "value": "0 12px 36px rgba(15,23,42,0.16)",
+    "purpose": "确认弹窗卡片。"
+   },
+   {
+    "name": "modal-xl",
+    "value": "0 20px 25px -5px rgba(15,23,42,0.1), 0 8px 10px -6px rgba(15,23,42,0.06)",
+    "purpose": "通用模态。"
+   },
+   {
+    "name": "sticky-bar",
+    "value": "0 -6px 16px rgba(15,23,42,0.05)",
+    "purpose": "底部导航条的上抛光。"
+   }
   ],
-  "narrative": {
-    "northStar": "The Amber Workbench",
-    "overview": "一块冷静、干净、井然的整理工作台：slate 灰承担全部结构性底色，琥珀（amber）是台面上唯一的暖光，只照在品牌、激活态、主动作和进度上。氛围是\"温和可靠\"——不是极客控制台，也不是消费级玩具，而是一位让人放心把文件交给它的助手：颜色几乎只花在状态与动作上，装饰极度节省。信息密度中等偏高：表格、日志控制台、目录树都为\"批量文件操作\"的效率服务。运行时（gpui）没有 CSS 过渡，所有状态切换都是瞬时的——系统因此更依赖\"色块 + 字重\"的清晰表达，而不是动效叙事；全局仅保留 loading 旋转与进行中脉冲圆点两个动效。",
-    "keyCharacteristics": [
-      "冷静 slate 打底；琥珀只出现在品牌 / 激活 / 主动作 / 进度 / 警告",
-      "卡片化信息分区 + 左侧 230px 步骤栏构成向导骨架",
-      "状态即颜色：emerald=成功、rose=错误、sky=信息、amber=警告（与品牌共用）",
-      "等宽字体承载一切\"文件系统真相\"（路径 / 模板 / 日志）",
-      "无过渡依赖：瞬时态切换 + 两个功能性动效（spin / pulse）"
-    ],
-    "rules": [
-      { "name": "The One Warm Accent Rule", "body": "琥珀是唯一的暖色声音。新 UI 不得引入第二暖色系；状态表达只能从 emerald / rose / sky 三组语义色取用。", "section": "colors" },
-      { "name": "The Don't-Retune Rule", "body": "amber 系数值是历史定下的生效值（如 amber-500 = #f59e0b、amber-400 = #ffc533），与常见 Tailwind 色阶不同。禁止按色阶惯例\"纠正\"——全 UI 配色按现值调过。", "section": "colors" },
-      { "name": "The Mono-Truth Rule", "body": "凡是文件系统的内容（路径、文件名、命名模板、日志行）一律 Menlo；界面语言一律 PingFang SC。两族不混用于同一内容。", "section": "typography" },
-      { "name": "The Flat-At-Rest Rule", "body": "静止即平面。新增表面不得自带阴影；阴影只随悬浮/弹层/激活态出现。", "section": "elevation" }
-    ],
-    "dos": [
-      "Do 一律用 theme::* 常量取色/圆角/阴影；新间距落在 4/8/12/16/20/24 节奏上。",
-      "Do 状态语义固定：emerald=成功、rose=错误、sky=信息、amber=警告与品牌。",
-      "Do 新图标走 assets/icons/（24×24、stroke=currentColor、fill=none）并在 icon.rs/assets.rs 登记；着色用 .text_color()（SVG alpha 遮罩机制）。",
-      "Do 文件系统内容（路径/文件名/模板/日志）一律 mono。",
-      "Do 改 token 时同步 theme.rs → DESIGN.md frontmatter。"
-    ],
-    "donts": [
-      "Don't 按色阶惯例\"修正\" amber 值（The Don't-Retune Rule）；也不要引入第二暖色系。",
-      "Don't 引入 toast / 全局通知——反馈一律内联 AlertBar。",
-      "Don't 给冲突行/警告行加特殊底色——冲突用徽章表达，行保持中性。",
-      "Don't 为装饰加阴影或动效（The Flat-At-Rest Rule；无过渡是运行时事实，不要伪造）。",
-      "Don't 手写 hex 或绕过 theme 常量造新灰色。"
-    ]
+  "motion": [
+   {
+    "name": "spin",
+    "value": "1s linear infinite",
+    "purpose": "loading 旋转图标——全局仅有的两个动效之一。"
+   },
+   {
+    "name": "pulse",
+    "value": "2s opacity 1↔0.6",
+    "purpose": "进行中步骤/当前文件的脉冲圆点。"
+   },
+   {
+    "name": "no-transitions",
+    "value": "none",
+    "purpose": "运行时（gpui）无 CSS 过渡，状态切换全部瞬时；不要伪造 hover/入场过渡。"
+   }
+  ]
+ },
+ "components": [
+  {
+   "name": "Primary Button",
+   "kind": "button",
+   "refersTo": "button-primary",
+   "description": "主动作按钮：琥珀底 + slate-800 字，悬浮/按下走 amber-600/700 梯度。",
+   "html": "<button class=\"ds-btn-primary\">开始扫描</button>",
+   "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 6px; background: #f59e0b; color: #1e293b; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 13px; font-weight: 600; line-height: 1.25; padding: 8px 14px; border: 1px solid #d97706; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); cursor: pointer; white-space: nowrap; } .ds-btn-primary:hover { background: #d97706; color: #0f172a; border-color: #b45309; box-shadow: 0 2px 4px rgba(0,0,0,0.08); } .ds-btn-primary:active { background: #b45309; color: #ffffff; border-color: #b36900; } .ds-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; pointer-events: none; }"
+  },
+  {
+   "name": "Ghost Button",
+   "kind": "button",
+   "refersTo": "button-ghost",
+   "description": "低强调操作（重置、清空）：透明底灰字，悬浮 slate-100。",
+   "html": "<button class=\"ds-btn-ghost\">重置</button>",
+   "css": ".ds-btn-ghost { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: #475569; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 12px; font-weight: 500; padding: 5px 10px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; } .ds-btn-ghost:hover { background: #f1f5f9; color: #0f172a; }"
+  },
+  {
+   "name": "Outline Button",
+   "kind": "button",
+   "refersTo": "button-outline",
+   "description": "次级动作（返回扫描、清空筛选）：透明底 + slate 边框。",
+   "html": "<button class=\"ds-btn-outline\">返回扫描</button>",
+   "css": ".ds-btn-outline { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: #334155; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 13px; font-weight: 500; padding: 8px 16px; border: 1px solid #cbd5e1; border-radius: 8px; cursor: pointer; } .ds-btn-outline:hover { background: #f8fafc; color: #0f172a; border-color: #94a3b8; }"
+  },
+  {
+   "name": "Mono Path Input",
+   "kind": "input",
+   "refersTo": "input",
+   "description": "文件系统的入口：Menlo 38px 高，聚焦边框 amber-500。",
+   "html": "<input class=\"ds-input\" placeholder=\"例如 D:\\Music 或 /Users/me/Music\" />",
+   "css": ".ds-input { width: 100%; height: 38px; background: #ffffff; color: #0f172a; font-family: Menlo, ui-monospace, monospace; font-size: 13px; padding: 8px 12px 8px 34px; border: 1px solid #cbd5e1; border-radius: 8px; outline: none; } .ds-input:hover { border-color: #94a3b8; } .ds-input:focus { border-color: #f59e0b; } .ds-input:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }"
+  },
+  {
+   "name": "Card",
+   "kind": "card",
+   "refersTo": "card",
+   "description": "台面上的托盘：白底 12px 圆角 1px subtle 边 + 微光；带标题行。",
+   "html": "<div class=\"ds-card\"><div class=\"ds-card-head\"><div><div class=\"ds-card-title\">扫描源目录</div><div class=\"ds-card-sub\">选择包含音频文件的文件夹，扫描并读取标签信息</div></div></div><div class=\"ds-card-body\">…</div></div>",
+   "css": ".ds-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 2px 0 rgba(15,23,42,0.05); overflow: hidden; } .ds-card-head { display: flex; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid #e2e8f0; } .ds-card-title { font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 15px; font-weight: 600; color: #1e293b; } .ds-card-sub { font-size: 12px; color: #64748b; margin-top: 2px; } .ds-card-body { padding: 18px 22px; }"
+  },
+  {
+   "name": "Amber Badge",
+   "kind": "chip",
+   "refersTo": "badge-amber",
+   "description": "标签纸三件套：soft 底 + 深字 + line 边的胶囊。",
+   "html": "<span class=\"ds-badge\">v2.0.1</span>",
+   "css": ".ds-badge { display: inline-flex; align-items: center; gap: 4px; background: #fef3c7; color: #7d4600; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border: 1px solid #ffdc80; border-radius: 9999px; line-height: 1.4; white-space: nowrap; }"
+  },
+  {
+   "name": "Amber Alert Bar",
+   "kind": "custom",
+   "refersTo": "alert-amber",
+   "description": "内联警告（无 toast）：amber-50 底 + 三角图标 + 12.5px 深字。",
+   "html": "<div class=\"ds-alert\"><span class=\"ds-alert-icon\">⚠</span><span>移动模式不可逆：执行后源文件将从原目录删除。</span></div>",
+   "css": ".ds-alert { display: flex; align-items: flex-start; gap: 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 12.5px; color: #7d4600; line-height: 1.6; } .ds-alert-icon { color: #d97706; }"
+  },
+  {
+   "name": "Segment Control",
+   "kind": "custom",
+   "refersTo": "segment-active",
+   "description": "单选分段胶囊：slate-100 轨道 + 白底激活片（amber-900 字 + 微光）。",
+   "html": "<div class=\"ds-segment\"><button class=\"ds-seg ds-seg-active\">复制（保留源文件）</button><button class=\"ds-seg\">移动（删除源文件）</button></div>",
+   "css": ".ds-segment { display: inline-flex; padding: 3px; gap: 2px; background: #f1f5f9; border-radius: 8px; } .ds-seg { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: #475569; font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 13px; font-weight: 500; padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; } .ds-seg-active { background: #ffffff; color: #7d4600; font-weight: 600; box-shadow: 0 1px 2px 0 rgba(15,23,42,0.05); }"
+  },
+  {
+   "name": "Step Nav Item (active)",
+   "kind": "custom",
+   "refersTo": "segment-active",
+   "description": "签名组件：38×38 激活步骤瓦片——琥珀底 + 色温光 + 脉冲圆点。",
+   "html": "<div class=\"ds-step\"><div class=\"ds-step-tile\">▶</div><div class=\"ds-step-text\"><div class=\"ds-step-title\">执行整理</div><div class=\"ds-step-desc\">批量安全归档与监控</div></div><span class=\"ds-step-dot\"></span></div>",
+   "css": ".ds-step { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 12px; } .ds-step-tile { width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; background: #f59e0b; color: #1e293b; border-radius: 10px; box-shadow: 0 1px 4px rgba(217,133,0,0.25); } .ds-step-title { font-family: 'PingFang SC', -apple-system, sans-serif; font-size: 13px; font-weight: 700; color: #7d4600; } .ds-step-desc { font-size: 11px; color: #64748b; margin-top: 2px; } .ds-step-dot { width: 7px; height: 7px; border-radius: 9999px; background: #f59e0b; margin-left: auto; animation: ds-pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; } @keyframes ds-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }"
+  },
+  {
+   "name": "Tooltip",
+   "kind": "overlay",
+   "refersTo": "tooltip",
+   "description": "截断路径/文件名的悬停全文浮层：Console Black 深底 + slate-100 文字、路径 mono、shadow-md、deferred 置顶。",
+   "html": "<div class=\"ds-tooltip\">/Users/me/Music/Album/03. Song.flac</div>",
+   "css": ".ds-tooltip { position: absolute; max-width: 560px; padding: 5px 10px; background: #020617; color: #e2e8f0; font-family: 'Menlo', ui-monospace, monospace; font-size: 12px; line-height: 1.5; border-radius: 6px; box-shadow: 0 4px 6px -1px rgba(15,23,42,0.08), 0 2px 4px -2px rgba(15,23,42,0.06); }"
   }
+ ],
+ "narrative": {
+  "northStar": "The Amber Workbench",
+  "overview": "一块冷静、干净、井然的整理工作台：slate 灰承担全部结构性底色，琥珀（amber）是台面上唯一的暖光，只照在品牌、激活态、主动作和进度上。氛围是\"温和可靠\"——不是极客控制台，也不是消费级玩具，而是一位让人放心把文件交给它的助手：颜色几乎只花在状态与动作上，装饰极度节省。信息密度中等偏高：表格、日志控制台、目录树都为\"批量文件操作\"的效率服务。运行时（gpui）没有 CSS 过渡，所有状态切换都是瞬时的——系统因此更依赖\"色块 + 字重\"的清晰表达，而不是动效叙事；全局仅保留 loading 旋转与进行中脉冲圆点两个动效。",
+  "keyCharacteristics": [
+   "冷静 slate 打底；琥珀只出现在品牌 / 激活 / 主动作 / 进度 / 警告",
+   "卡片化信息分区 + 左侧 230px 步骤栏构成向导骨架",
+   "状态即颜色：emerald=成功、rose=错误、sky=信息、amber=警告（与品牌共用）",
+   "等宽字体承载一切\"文件系统真相\"（路径 / 模板 / 日志）",
+   "无过渡依赖：瞬时态切换 + 两个功能性动效（spin / pulse）"
+  ],
+  "rules": [
+   {
+    "name": "The One Warm Accent Rule",
+    "body": "琥珀是唯一的暖色声音。新 UI 不得引入第二暖色系；状态表达只能从 emerald / rose / sky 三组语义色取用。",
+    "section": "colors"
+   },
+   {
+    "name": "The Don't-Retune Rule",
+    "body": "amber 系数值是历史定下的生效值（如 amber-500 = #f59e0b、amber-400 = #ffc533），与常见 Tailwind 色阶不同。禁止按色阶惯例\"纠正\"——全 UI 配色按现值调过。",
+    "section": "colors"
+   },
+   {
+    "name": "The Mono-Truth Rule",
+    "body": "凡是文件系统的内容（路径、文件名、命名模板、日志行）一律 Menlo；界面语言一律 PingFang SC。两族不混用于同一内容。",
+    "section": "typography"
+   },
+   {
+    "name": "The Flat-At-Rest Rule",
+    "body": "静止即平面。新增表面不得自带阴影；阴影只随悬浮/弹层/激活态出现。",
+    "section": "elevation"
+   }
+  ],
+  "dos": [
+   "Do 一律用 theme::* 常量取色/圆角/阴影；新间距落在 4/8/12/16/20/24 节奏上。",
+   "Do 状态语义固定：emerald=成功、rose=错误、sky=信息、amber=警告与品牌。",
+   "Do 新图标走 assets/icons/（24×24、stroke=currentColor、fill=none）并在 icon.rs/assets.rs 登记；着色用 .text_color()（SVG alpha 遮罩机制）。",
+   "Do 文件系统内容（路径/文件名/模板/日志）一律 mono。",
+   "Do 改 token 时同步 theme.rs → DESIGN.md frontmatter。",
+   "新交互控件一律键盘可达：track_focus + 聚焦可见态（Focus Ring 边框或悬浮同款底色），Enter/Space 由框架转发。",
+   "小字正文对比度 ≥4.5:1：浅底次要文字最低 slate-500（slate-400 仅限占位符/装饰图标）、amber 警示正文 amber-900、语义徽章深字 700 档。",
+   "截断显示的文件系统内容配 Tooltip 悬停全文。"
+  ],
+  "donts": [
+   "Don't 按色阶惯例\"修正\" amber 值（The Don't-Retune Rule）；也不要引入第二暖色系。",
+   "Don't 引入 toast / 全局通知——反馈一律内联 AlertBar。",
+   "Don't 给冲突行/警告行加特殊底色——冲突用徽章表达，行保持中性。",
+   "Don't 为装饰加阴影或动效（The Flat-At-Rest Rule；无过渡是运行时事实，不要伪造）。",
+   "Don't 手写 hex 或绕过 theme 常量造新灰色。"
+  ]
+ }
 }

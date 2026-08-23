@@ -124,14 +124,21 @@ components:
     height: "38px"
   segment-active:
     backgroundColor: "{colors.surface}"
-    textColor: "{colors.primary-ink-soft}"
+    textColor: "{colors.primary-ink}"
     rounded: "{rounded.sm}"
     padding: "6px 14px"
   alert-amber:
     backgroundColor: "{colors.primary-softer}"
-    textColor: "{colors.primary-ink-soft}"
+    textColor: "{colors.primary-ink}"
     rounded: "{rounded.md}"
     padding: "10px 14px"
+  tooltip:
+    backgroundColor: "{colors.console-bg}"
+    textColor: "{colors.line-subtle}"
+    rounded: "{rounded.sm}"
+    padding: "5px 10px"
+    typography: "{typography.mono}"
+    maxWidth: "560px"
 ---
 
 # Design System: Tag2Folders
@@ -164,7 +171,7 @@ components:
 - **Amber Deep**（hover #d97706 / active #b45309）：主按钮的悬浮与按下梯度。
 - **Amber Soft**（#fef3c7 底 + #7d4600 字 + #ffdc80 边）：amber 徽章与选中分段控件的浅色三件套。
 - **Amber Wash** (#fffbeb)：警告横幅与"当前处理"条的低饱和底。
-- **Focus Ring** (#ffae00)：输入框聚焦边框（硬编码历史值，非 amber-500）。
+- **Focus Ring** (#ffae00)：输入框聚焦边框与自绘交互控件的聚焦可见边框（硬编码历史值，非 amber-500）。
 
 ### Neutral
 
@@ -173,7 +180,7 @@ components:
 - **Workbench Grey** (#f8fafc)：应用底色（= slate-50），与 Paper 形成"台面 vs 卡片"两级。
 - **Muted Grey** (#f1f5f9)：表头底、分段控件轨道、次级 chip 底。
 - **Line**（subtle #e2e8f0 / default #cbd5e1）：两级 1px 边框；输入框用 default，卡片分隔用 subtle。
-- **Console Black** (#020617)：日志控制台专用深底，全应用唯一深色表面。
+- **Console Black** (#020617)：日志控制台与悬浮提示浮层共用的深底，全应用唯一的深色表面语言。
 
 ### Tertiary
 
@@ -247,8 +254,9 @@ components:
 克制而清晰：色块即语义，按下即确认。
 - **Shape:** 圆角 8px（sm 6px）；尺寸 sm 5×10/12px、md 8×14/13px、lg 10×20/14px。
 - **Primary:** amber-500 底 + slate-800 字（#1e293b，非纯白）+ 600 字重；hover amber-600、active amber-700。
-- **Secondary / Outline / Ghost / Danger:** slate-100 底 / 透明底灰边 / 纯透明灰字 / rose-50 底 rose-600 字（hover 反白）。
+- **Secondary / Outline / Ghost / Danger:** slate-100 底 / 透明底灰边 / 纯透明灰字 / rose-50 底 rose-700 字（hover 反白）。
 - **States:** disabled = opacity 0.55 + 禁悬浮；loading = 禁用 + 前置旋转图标（1s 线性）；图标可左可右（icon_right）。
+- **Keyboard:** 全部按钮 Tab 可聚焦（禁用态除外），聚焦态 1px 边框换 Focus Ring #ffae00，Enter/Space 激活由 gpui 框架转发。
 
 ### Badges & StatusBadge
 
@@ -270,19 +278,23 @@ components:
 
 ### Segment Control（分段胶囊）
 
-单选的安静表达：slate-100 轨道（padding 3）+ 白底激活片（600 字重 amber-800 字 + shadow-xs + 6px 圆角）；用于操作模式 toggle 与结果区 Tabs；激活 Tab 可带计数徽章（amber-200 底 amber-900 字）。
+单选的安静表达：slate-100 轨道（padding 3）+ 白底激活片（600 字重 amber-900 字 + shadow-xs + 6px 圆角）；用于操作模式 toggle 与结果区 Tabs；激活 Tab 可带计数徽章（amber-200 底 amber-900 字）。分段按钮键盘可达（常驻 1px 透明边框，聚焦时换 Focus Ring）。
 
 ### Alert Bars
 
-没有 toast，一切就地说话：rose（错误，可 pre-wrap 多行）/ amber（警告，如"移动模式不可逆"）/ sky（信息，如空扫描结果）；图标 15px + 文字 12.5px + 8px 圆角。
+没有 toast，一切就地说话：rose（错误，可 pre-wrap 多行）/ amber（警告，如"移动模式不可逆"，文字 amber-900）/ sky（信息，如空扫描结果）；图标 15px + 文字 12.5px + 8px 圆角。
+
+### Tooltip（悬浮提示浮层）
+
+截断处不说谎：凡 truncate 的文件系统内容，悬停即见全文。深底 Console Black + slate-100 文字 12/1.5、padding 5×10、圆角 sm、shadow-md、路径类 mono、max宽 560；浮现于鼠标右下 (+14/+18)，deferred 置顶。用于扫描表文件名、映射表源/目标路径、任务概览目标目录 chip、正在处理文件名、目录树文件行。
 
 ### Step Nav（签名组件）
 
-向导的骨架与进度本身：38×38 图标瓦片四态——done（emerald-50 底 emerald-600 Check 图标）/ active（amber-500 底 + 琥珀光晕阴影 + 700 字重）/ dimmed（opacity 0.5）/ 默认（slate-100 底）；步骤间 2px 连接线随解锁从 slate-100 变 amber-400；激活项右侧 7px 脉冲圆点（2s，opacity 1↔0.6）。
+向导的骨架与进度本身：38×38 图标瓦片四态——done（emerald-50 底 emerald-600 Check 图标 + "已完成"文字 emerald-700）/ active（amber-500 底 + 琥珀光晕阴影 + 700 字重）/ dimmed（opacity 0.5）/ 默认（slate-100 底）；步骤间 2px 连接线随解锁从 slate-100 变 amber-400；激活项右侧 7px 脉冲圆点（2s，opacity 1↔0.6）。已解锁步骤条目键盘可达（Tab + Enter/Space，聚焦=悬浮底色；⌘/Ctrl+1~3 为等价快捷路径）。
 
 ### Directory Tree
 
-档案柜抽屉：目录行（chevron + Folder/FolderOpen amber-500 图标 + 名称 13/600 + `(N)` 计数）缩进 depth×20+6；文件行 mono 12.5 + FileAudio amber-600 图标缩进 (depth+1)×20+8；默认展开 depth<2；头部带过滤输入与"全部折叠/展开"。
+档案柜抽屉：目录行（chevron + Folder/FolderOpen amber-500 图标 + 名称 13/600 + `(N)` 计数）缩进 depth×20+6；文件行 mono 12.5 + FileAudio amber-600 图标缩进 (depth+1)×20+8；展开三态——默认展开 depth<2、"全部展开"开全部层级、"全部折叠"全收起（手动切换过的节点在任何模式下取反）；头部带过滤输入与"全部折叠/展开"。目录行与文件行键盘可达（Tab + Enter/Space，聚焦=悬浮底色），文件行悬停见完整文件名 Tooltip。
 
 ## Do's and Don'ts
 
@@ -293,6 +305,9 @@ components:
 - **Do** 新图标走 `assets/icons/`（24×24、stroke=currentColor、fill=none）并在 `icon.rs`/`assets.rs` 登记；着色用 `.text_color()`（SVG alpha 遮罩机制）。
 - **Do** 文件系统内容（路径/文件名/模板/日志）一律 mono。
 - **Do** 改 token 时同步 theme.rs → 本文档 frontmatter。
+- **Do** 新交互控件一律键盘可达：`track_focus`（keyed state 句柄）+ 聚焦可见态（Focus Ring 边框或悬浮同款底色），Enter/Space 由框架转发。
+- **Do** 小字正文（<18.66px 加粗 / <24px 常规）对比度 ≥4.5:1——浅底上次要文字最低 slate-500（slate-400 仅限占位符与装饰图标）、amber 警示正文用 amber-900、语义徽章深字用 700 档。
+- **Do** 截断显示的文件系统内容配 Tooltip 悬停全文。
 
 ### Don't:
 

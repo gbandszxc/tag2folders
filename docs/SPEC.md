@@ -7,7 +7,7 @@
 ## 1. 产品概览
 
 - 单窗口向导式桌面工具，三步整理音频文件：**扫描 → 模板预览 → 执行整理**。
-- 窗口：标题 `Tag2Folders`，1100×750（最小 900×600），可缩放，系统标题栏，版本徽章 `v2.0.1`。
+- 窗口：标题 `Tag2Folders`，1100×750（最小 900×600），可缩放，系统标题栏，版本徽章（`env!("CARGO_PKG_VERSION")` 编译期注入，随 Cargo.toml 单一来源）。
 - 技术栈：Rust（edition 2021，≥1.85）、gpui 0.2.2 + gpui-component 0.5.1（均 crates.io，**禁止混入 git 依赖的 gpui**，会双版本冲突）；gpui 开启 `runtime_shaders` feature（构建期无需 `xcrun metal`，装好完整 Xcode 后可移除）。
 - crate 布局：`lib`（`tag2folders_lib`，纯逻辑，无 gpui）+ `bin`（`tag2folders`，UI）。`cargo test --lib` 可独立验证后端。
 
@@ -53,7 +53,7 @@ src/
 - `on_mouse_down(MouseButton::Left, |_: &MouseDownEvent, _: &mut Window, _: &mut App| ...)`：第一个参数必须给按键；闭包参数要显式标注类型（否则 HRTB 推导失败）。
 - `FluentBuilder::when/when_some` 只对 `IntoElement` 可用，**不能用在 `.hover(|st| ...)` 闭包里**（StyleRefinement 不是 element），闭包内用 if/else。
 - `InputState::set_value` 需要 `&mut Window`——异步回调里用 `run_service_in` / `spawn_in` + `update_in`。
-- 按钮的 `title`（悬浮提示）属性无 gpui 等价，未实现。
+- 按钮的 `title` 属性无 gpui 等价（按钮有可见文字标签，无碍）；截断路径/文件名的悬浮提示已用自绘 deferred 浮层实现（见 §9 Tooltip）。
 - 图标着色必须 `.text_color()` 设在 svg 自身（alpha 遮罩机制，不继承父元素颜色）。
 - 字体 "PingFang SC" / "Menlo" 已运行时验证可解析，中文正常。
 - `gpui_component::init(cx)` → `ui::theme::apply_to_gpui_component(cx)` 顺序不可反；窗口根必须是 `gpui_component::Root`（Dialog/Sheet/Notification 层依赖）。
@@ -192,7 +192,7 @@ pub struct ProgressEvent { task_id, status, current, total, current_file, messag
 ### 7.1 布局
 
 - 根：纵向 flex、`bg-app`（#f8fafc）、字体 PingFang SC / 基准 14px / 行高 1.5。
-- 顶栏（58px，白底、下边框）：品牌区（34×34 amber-500 圆角方块 Tag 图标 + `Tag2Folders` + 副标题 `音频文件智能整理 · 扫描 → 预览 → 执行`）｜右侧 `v2.0.1` 徽章 + 重置按钮（ghost sm）。
+- 顶栏（58px，白底、下边框）：品牌区（34×34 amber-500 圆角方块 Tag 图标 + `Tag2Folders` + 副标题 `音频文件智能整理 · 扫描 → 预览 → 执行`）｜右侧版本徽章（取自 Cargo.toml）+ 重置按钮（ghost sm）。
 - 左步骤栏：固定 230px 白底；三步骤（`扫描文件/选择源目录与提取标签`、`模板预览/规划命名与结构方案`、`执行整理/批量安全归档与监控`）；38×38 瓦片分态（done=emerald+Check / active=amber+阴影 / dimmed=opacity 0.5）；连接线随解锁变 amber-400；点击仅 ≤ max_unlocked 可达。
 - 工作区：flex 1、纵向滚动、padding 24、内容 max-width 1080 居中。
 
@@ -203,6 +203,7 @@ pub struct ProgressEvent { task_id, status, current, total, current_file, messag
 - 预览页"开始执行整理" → `max_unlocked=3; current_step=3`（**无二次确认弹窗**，移动模式的防护 = 预览页静态警告条 + 进度页"准备开始"文案）。
 - "返回扫描" / "下一步" 直接切页，无解锁检查。
 - `reset`（重置确认 / "完成并开启新任务"，均不再二次确认）：回步骤 1、max_unlocked=1、三 token+1 丢弃在途请求、清 taskId（内存+持久化文件）、重建三页。
+- 键盘：⌘/Ctrl+1~3 切换步骤（尊重 max_unlocked）；**全部自绘交互控件 Tab 可聚焦 + Enter/Space 激活**（`track_focus` + `use_keyed_state` 按 id 持久化句柄，激活由 gpui 框架转发）；聚焦可见态 = Focus Ring 边框（按钮/芯片/分段）或悬浮同款底色（筛选胶囊/步骤条目/树行/浏览条目）。
 
 ### 7.3 确认弹窗（全应用仅两处）
 
@@ -230,7 +231,7 @@ pub struct ProgressEvent { task_id, status, current, total, current_file, messag
 - 扫描失败：rose 错误条 + 清结果；成功但 0 文件：sky 提示条 `未发现音频文件。请检查目录路径，或尝试开启「递归扫描子目录」后重新扫描。`
 - 看板胶囊 4 枚：总文件数(amber) / 可读取(emerald) / 不可读取(rose) / 筛选结果(slate，仅有筛选词时)。
 - 筛选：6 字段单选胶囊（文件名/艺术家/专辑/标题/年份/流派）+ 关键词输入 + 清空按钮（有词或非默认字段时显示）；匹配 = **大小写不敏感子串**，filename 字段只匹配 basename（`/` 与 `\` 切分取末段）。
-- 文件表格 5 列：文件名 30% / 艺术家 18% / 专辑 20% / 标题 22% / 状态 10%（StatusBadge sm：ok/unreadable）；固定表头 + 表体容器内滚动（max 480）+ 外层横向滚动（min 560）；**最多渲染 200 行**，超出提示 `仅显示前 200 条，共 {N} 条。可使用筛选缩小范围。`；行 hover 无斑马纹、不可点击。
+- 文件表格 5 列：文件名 30% / 艺术家 18% / 专辑 20% / 标题 22% / 状态 10%（StatusBadge sm：ok/unreadable）；固定表头 + 表体容器内滚动（max 480）+ 外层横向滚动（min 560）；**最多渲染 200 行**，超出提示 `仅显示前 200 条，共 {N} 条。可使用筛选缩小范围。`；行 hover 无斑马纹、不可点击；文件名列 truncate，悬停 Tooltip 提示完整 `f.path`。
 - 底部导航：左侧计数（`已筛选 x / y 个文件` / `共 N 个音频文件`）；右侧 `下一步：设置模板`（有筛选词时 `（N 个）`），无文件禁用。**带筛选词点击下一步 = 提交筛选子集为 App 级数据**（下游预览只用被筛过的文件）。
 
 ### 7.6 预览页（步骤 2）
@@ -247,8 +248,8 @@ pub struct ProgressEvent { task_id, status, current, total, current_file, messag
 - 结果区（mappings 非空才整体显示）：
   - 统计 6 卡：文件总数 / 正常 / 冲突（conflict+batch_conflict）/ 缺失信息 / 不可读 / 越界+写入受阻；flex wrap、每卡 min-width 150；
   - Tabs 分段切换：`详细映射列表`（带总数徽章）/ `目录树层级预览`（激活时右侧附注 `点击文件夹可展开 / 折叠`）；
-  - 映射表 3 列：源文件（basename）38% / 目标路径（**final_target 完整路径**）46% / 最终状态（StatusBadge sm）16%；最多渲染 **300 行**（`仅显示前 300 条映射，共 {N} 条。`）；冲突行**无特殊底色**（以 amber 徽章表达）；行不可点击；
-  - 目录树：头部工具栏（Layers 图标 + `目标目录结构` + 过滤输入 `过滤文件...` + `全部折叠/全部展开` 切换）；主体 min 140 / max 420 容器内滚动；**默认展开 depth < 2**；目录行（缩进 depth×20+6、数量徽标 `(直接子项数)`）点击切换开合；文件行缩进 (depth+1)×20+8、mono 12.5；**过滤仅作用于文件名**（小写子串，整组无匹配则不渲染该组）；同层排序 = 字典序（serde_json BTreeMap）；
+  - 映射表 3 列：源文件（basename）38% / 目标路径（**final_target 完整路径**）46% / 最终状态（StatusBadge sm）16%；最多渲染 **300 行**（`仅显示前 300 条映射，共 {N} 条。`）；冲突行**无特殊底色**（以 amber 徽章表达）；行不可点击；源/目标单元格 truncate，悬停 Tooltip 分别提示完整 `source` / `final_target`；
+  - 目录树：头部工具栏（Layers 图标 + `目标目录结构` + 过滤输入 `过滤文件...` + `全部折叠/全部展开` 切换）；主体 min 140 / max 420 容器内滚动；展开三态（默认展开 depth<2 / `全部展开`=开全部层级 / `全部折叠`=全收起，手动切换过的节点取反，切换清空 toggled 记录）；目录行（缩进 depth×20+6、数量徽标 `(直接子项数)`）点击切换开合（键盘可达：Tab+Enter）；文件行缩进 (depth+1)×20+8、mono 12.5、悬停 Tooltip 提示完整文件名；**过滤仅作用于文件名**（小写子串，整组无匹配则不渲染该组）；同层排序 = 字典序（serde_json BTreeMap）；
   - 底部导航：`返回扫描`（outline）｜`开始执行整理（{N} 个文件）`，N = 总数 − unreadable − boundary_error − write_error，**N=0 禁用**。
 - 开始执行整理：剔除 `unreadable / boundary_error / write_error` 三类映射（预检会整批拒绝），整理参数交 App 级（target = resolvedTargetDir || 目标目录 || sourceDir），清旧 taskId，解锁步骤 3。
 - App 级整理批次复位时 `organize_mode` 回 **Move**（与页面默认一致）。
@@ -256,9 +257,9 @@ pub struct ProgressEvent { task_id, status, current, total, current_file, messag
 ### 7.7 进度页（步骤 3）
 
 - 无映射：amber 警告条 `没有待处理的文件，请先完成扫描和预览步骤。`（无按钮）。
-- 任务概览卡：操作模式徽章（`移动（删除源文件）`/`复制（保留源文件）`）/ 目标目录 mono chip（空显示 `（未设置）`）/ 待处理总数（amber 大数字）。
+- 任务概览卡：操作模式徽章（`移动（删除源文件）`/`复制（保留源文件）`）/ 目标目录 mono chip（空显示 `（未设置）`；非空悬停 Tooltip 提示完整路径）/ 待处理总数（amber 大数字）。
 - 准备开始卡（未发起）：说明文字（`将移动/复制 N 个文件到目标目录，…`，计数加粗 amber）+ errMsg（发起失败时，rose）+ `开始执行` 按钮；`starting` 防双击；**发起失败 started 回 false 可重试**。
-- 执行进度卡（进行中）：百分比大字（32px amber-800，`round(current/total*100)`，无快照或 total=0 → 0）+ `x / y 已处理`（无快照 `等待任务开始…`）+ 进度条（轨道 12 圆角 full slate-100、填充 amber-500）+ 当前文件条（脉冲圆点 + `正在处理` + mono 文件名）。
+- 执行进度卡（进行中）：百分比大字（32px amber-800，`round(current/total*100)`，无快照或 total=0 → 0）+ `x / y 已处理`（无快照 `等待任务开始…`）+ 进度条（轨道 12 圆角 full slate-100、填充 amber-500）+ 当前文件条（脉冲圆点 + `正在处理` + mono 文件名，悬停 Tooltip 提示完整路径）。
 - 完成横幅（done）：emerald，`整理完成` + `共处理 {N} 个文件，任务已成功结束。` + `完成并开启新任务`（= 直接 reset，不弹确认）。
 - 失败横幅（error 终态）：rose，`任务执行失败` + 错误正文（pre-wrap；message 为空时显示 `执行出错`）+ 同款完成按钮。
 - 实时日志卡（`实时日志` + TERMINAL 徽章）：slate-950 控制台、mono 12 / 行高 1.8、max 260；行着色：`[n/total]` 前缀 amber-400 + 正文 sky-300，非括号行 slate-400；`current_file` 行与上一行相同不重复追加，message 行不去重；**缓冲上限 300**（丢最旧）；**滚动锚定**：距底 ≤40px 时新日志自动跟底，上翻不打扰。
@@ -280,14 +281,15 @@ pub struct ProgressEvent { task_id, status, current, total, current_file, messag
 
 | 组件 | 要点 |
 |---|---|
-| `Button` | variant primary/secondary/outline/ghost/danger × size sm/md/lg；loading = 禁用+旋转图标；disabled opacity 0.55；可覆写 height/pad_x/text_size |
+| `Button` | variant primary/secondary/outline/ghost/danger（danger 常态字 rose-700）× size sm/md/lg；loading = 禁用+旋转图标；disabled opacity 0.55；可覆写 height/pad_x/text_size；键盘可达（Tab+Enter/Space，聚焦边框 Focus Ring） |
 | `badge` / `BadgeVariant` | emerald/amber/rose/sky/slate 三色胶囊；`StatusBadge` 七状态映射：ok=正常(emerald)、conflict=磁盘冲突(amber)、batch_conflict=批内冲突(amber)、missing_metadata=缺失信息(sky)、unreadable=不可读(slate)、boundary_error=路径越界(rose)、write_error=写入受阻(rose)；未知值原样 slate |
 | `Card` | title/subtitle/actions + padding 档位 none/sm/md/lg = 0 / 12×16 / 18×22 / 24×28；白底圆角 12 |
 | `AlertBar` | rose/amber/sky 三变体内联提示条；支持 pre_wrap 多行 |
 | `ProgressBar` | `new(current, total)`，amber-500 填充 |
 | `StepNav` | STEPS 常量 + 分态瓦片 + 连接线；`step_nav_aside()` 230px 容器 |
-| `Modal` / `ConfirmModal` | ConfirmOptions 默认：confirm `确定`/cancel `取消`/tone Warning/width 460；四 tone（Warning/Danger/Info/Primary）；Escape=取消、Enter=确认 |
+| `Modal` / `ConfirmModal` | ConfirmOptions 默认：confirm `确定`/cancel `取消`/tone Warning/width 460；四 tone（Warning/Danger/Info/Primary）；Escape=取消、Enter=确认；通用 Modal 关闭按钮 Tab 可达 |
 | `DirPicker` | 输入框(mono h38 + Folder 图标 + 清空按钮) + `浏览...` 按钮；**原生对话框优先，打开失败降级内置浏览模态**；模态：主页/上一级按钮、路径输入（Enter 跳转 / Escape 关闭 / Blur 回显）、过滤（name 小写子串）、条目整行点击=进入、footer `共 N 个子文件夹` + `取消` + `选择此目录`（currentPath 为空禁用）+ 当前选择预览条 |
+| `Tooltip` | 截断内容悬停浮层：deferred 置顶、绝对定位鼠标右下 (+14/+18)、Console Black 深底 + slate-100 文字 12/1.5、padding 5×10、圆角 sm、shadow-md、路径 mono、max宽 560；v1 不追踪鼠标移动、不做边缘钳制 |
 | `Icon` | 32 枚举；SVG 24×24 stroke=currentColor；**着色 = `.text_color()`（alpha 遮罩机制）**；assets 33 个 svg（check 双用、circle-x 为组件库清空按钮） |
 
 ## 10. 边界行为速查
