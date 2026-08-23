@@ -1,2 +1,21 @@
+# Build & Artifacts
 /target
+/shots
+
+# OS Generated Files
 .DS_Store
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE & Editor Files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs & Temp Files
+*.log
+*.tmp
