@@ -8,9 +8,13 @@
    - 严格遵循单一暖色原则（琥珀 Amber 为唯一暖色焦点，slate 灰阶承载骨架，语义色 emerald/rose/sky 仅用于状态表达）。
 3. **GPUI 官方文档与组件库规范（gpui-component）：**
    - **优先查阅官方文档**：遇到 GPUI 视图模型、实体生命周期（`Entity<T>`）、订阅监听（`subscribe`/`subscribe_in`）、异步上下文（`spawn_in`/`update_in`）、事件与焦点管理等不确定之处，严禁猜测 API，必须优先查阅官方文档与源码。
-   - **纯文本/Markdown 导航源 (llms.txt)**：
-     - `gpui-component` LLM 纯文本导航源：[`https://longbridge.github.io/gpui-component/llms.txt`](https://longbridge.github.io/gpui-component/llms.txt)（全量文档源：[`https://longbridge.github.io/gpui-component/llms-full.txt`](https://longbridge.github.io/gpui-component/llms-full.txt) / 中文主页：[`https://longbridge.github.io/gpui-component/zh-CN/docs.md`](https://longbridge.github.io/gpui-component/zh-CN/docs.md)）。
-     - GPUI 官方源码与示例：[`https://github.com/zed-industries/zed/tree/main/crates/gpui`](https://github.com/zed-industries/zed/tree/main/crates/gpui) 与 API 手册 [`https://docs.rs/gpui`](https://docs.rs/gpui)。
+   - **文档与导航源（渐进式加载）：**
+     - `gpui-component`（渐进式导航入口）：
+       https://longbridge.github.io/gpui-component/llms.txt
+     - GPUI 官方源码与示例：
+       https://github.com/zed-industries/zed/tree/main/crates/gpui
+     - GPUI docs.rs API 参考：
+       https://docs.rs/gpui
    - **组件复用加速开发**：涉及高交互控件（如 `Input`、`Checkbox`、`Button`、`Modal/Dialog`、`Dropdown`、`Table`、`VirtualList` 等），优先引用或基于 `gpui-component`（配合 `theme::apply_to_gpui_component` 换肤）构建，避免低效造轮子。
    - **版本约束**：锁定使用 `Cargo.toml` 声明的 crates.io 注册表版本，**严禁混入 Git 依赖的 gpui**（会与 `gpui-component` 产生双版本类型冲突）。
 
