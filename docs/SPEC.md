@@ -1,8 +1,8 @@
 # Tag2Folders 应用规格（SPEC）
 
 > 本文档描述**当前代码库的实现事实**，是功能开发与测试的基准线。
-> 文中数值/文案/行为均提取自 `src/`，改动代码时请同步更新对应章节；两者冲突时以代码为准并回来修文档。
-> UI 组装套路与 gpui 坑位见 `docs/UI_GUIDE.md`；打包见 `docs/PACKAGING.md`。
+> 文中数值/文案/行为均提取自 `src/``，改动代码时请同步更新对应章节；两者冲突时以代码为准并回来修文档。
+> 视觉系统（token/组件/设计规则）见根目录 `DESIGN.md`；日常命令见 `docs/MANUAL.md`；打包见 `docs/PACKAGING.md`。
 
 ## 1. 产品概览
 
@@ -39,13 +39,26 @@ src/
     └── components/     button / badge / card / alert_bar / progress_bar / step_nav / modal
 ```
 
-**UI 状态架构约定**（详见 `src/app.rs` 模块注释与 UI_GUIDE）：
+**UI 状态架构约定**（详见 `src/app.rs` 模块注释）：
 
 - 根实体 `AppShell`（实现 Render）持有全部向导状态：`current_step` / `max_unlocked_step` / 三个页面结构体 / 确认弹窗槽。
 - 页面是**普通 struct**（非 Entity），字段直接挂在 AppShell 上；高交互控件持有独立 Entity（`Entity<DirPickerState>`、`Entity<InputState>`），事件回路在 `wire_page_subscriptions` 建立。
 - `AppShell::reset` **重建页面结构体**（等价重挂载，内部状态与订阅全部丢弃重建），并归位步骤状态、清 taskId。
 - 三页状态常驻：切页不丢页面内部状态（struct 字段常驻 + render 按 `current_step` 切换）。
 - **竞态 token**：`scan_token` / `preview_token` / `progress_token` 挂 AppShell（跨 reset 单调递增），发起时快照、回调比对，过期响应丢弃。
+
+### gpui 环境事实（已验证，勿再踩）
+
+- div **没有** transform/transition（`.scale()` 不存在；hover 态切换瞬时）；需要 transform 的只有 `svg().with_transformation(...)`。
+- `on_mouse_down(MouseButton::Left, |_: &MouseDownEvent, _: &mut Window, _: &mut App| ...)`：第一个参数必须给按键；闭包参数要显式标注类型（否则 HRTB 推导失败）。
+- `FluentBuilder::when/when_some` 只对 `IntoElement` 可用，**不能用在 `.hover(|st| ...)` 闭包里**（StyleRefinement 不是 element），闭包内用 if/else。
+- `InputState::set_value` 需要 `&mut Window`——异步回调里用 `run_service_in` / `spawn_in` + `update_in`。
+- 按钮的 `title`（悬浮提示）属性无 gpui 等价，未实现。
+- 图标着色必须 `.text_color()` 设在 svg 自身（alpha 遮罩机制，不继承父元素颜色）。
+- 字体 "PingFang SC" / "Menlo" 已运行时验证可解析，中文正常。
+- `gpui_component::init(cx)` → `ui::theme::apply_to_gpui_component(cx)` 顺序不可反；窗口根必须是 `gpui_component::Root`（Dialog/Sheet/Notification 层依赖）。
+- `window.on_window_should_close` 存在（关闭确认 `register_close_guard` 基于它）。
+- 视口/滚动模型：外层 relative + size_full + overflow_hidden 约束 → 内层 flex_col + min_h0 + overflow_y_scroll。
 
 ## 3. 数据契约（`core` 类型，serde snake_case）
 
@@ -252,6 +265,8 @@ pub struct ProgressEvent { task_id, status, current, total, current_file, messag
 - 轮询：1s 一次 `get_task_status`；查询失败**静默重试不断轮询**；done/error 停止；token 失效（reset/新任务）自杀。
 
 ## 8. 设计 token（theme.rs）
+
+> 视觉系统全量（色彩角色/字体层级/组件规范/设计规则）见根目录 `DESIGN.md`；本节保留工程侧要点。
 
 - 颜色常量命名对应 CSS 变量（`--slate-50` → `SLATE_50`）。色板：slate 50-950、amber 50-900、emerald/rose/sky 50-200+500-700。
 - ⚠️ **amber 系为历史定下的有效值，勿按色阶惯例"纠正"**：`AMBER_500 = #f59e0b`（品牌主色）、`AMBER_400 = #ffc533` 等，全 UI 配色按现值调过。`amber-950` 不存在，芯片悬浮文字用 `INHERITED_TEXT = #0f172a`。

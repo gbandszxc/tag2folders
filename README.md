@@ -46,15 +46,16 @@ cargo clippy --all-targets
 │   └── ui/                 # theme / icon / assets / dir_picker / components
 ├── assets/                 # SVG 图标与应用图标
 ├── scripts/                # build-dmg.sh / build-msi.ps1 / tag2folders.wxs
-└── docs/                   # SPEC / UI_GUIDE / MANUAL / PACKAGING
+└── docs/                   # SPEC / MANUAL / PACKAGING
 ```
 
 ## 文档
 
 | 文档 | 内容 |
 |---|---|
+| [`PRODUCT.md`](PRODUCT.md) | 产品上下文：用户、定位、原则（impeccable 基准） |
+| [`DESIGN.md`](DESIGN.md) | 设计系统：色彩 / 字体 / 布局 / 组件规范（视觉权威快照） |
 | [`docs/SPEC.md`](docs/SPEC.md) | 应用规格基准线：行为、数据契约、错误文案、设计 token（改代码须同步） |
-| [`docs/UI_GUIDE.md`](docs/UI_GUIDE.md) | UI 开发指南：加页 / 调服务 / 弹窗套路与 gpui 坑位 |
 | [`docs/MANUAL.md`](docs/MANUAL.md) | 开发手册：日常启停、调试日志、发版与排查命令 |
 | [`docs/PACKAGING.md`](docs/PACKAGING.md) | 打包说明：macOS DMG / Windows MSI |
 

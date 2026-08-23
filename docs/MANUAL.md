@@ -1,6 +1,6 @@
 # 开发手册（MANUAL）
 
-> 日常开发的工作命令与排查经验。规格基准见 `SPEC.md`，UI 组装见 `UI_GUIDE.md`，打包细节见 `PACKAGING.md`。
+> 日常开发的工作命令与排查经验。规格基准见 `SPEC.md`，视觉系统见根目录 `DESIGN.md`，打包细节见 `PACKAGING.md`。
 
 ## 启停
 
