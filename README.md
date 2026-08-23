@@ -1,6 +1,15 @@
-# Tag2Folders
+<p align="center">
+  <img src="assets/app-icon.png" width="128" alt="Tag2Folders" />
+</p>
 
-基于音频元数据标签自动整理文件的桌面工具（纯 Rust + GPUI），向导式三步：**扫描 → 模板预览 → 执行整理**。
+<h1 align="center">Tag2Folders</h1>
+
+<p align="center">
+  基于音频元数据标签自动整理文件的桌面工具（纯 Rust + GPUI）<br>
+  向导式三步：<b>扫描 → 模板预览 → 执行整理</b>
+</p>
+
+---
 
 ## 功能特性
 
